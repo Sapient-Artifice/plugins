@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Task {{ task.id }} — Mage Scheduler{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Task {{ task.id }}</h1>
+    <div class="sub">
+        Created {{ task.created_at | local_time }}
+        &mdash;
+        Run at {{ task.run_at | local_time }}
+        &mdash;
+        <span class="badge badge-{{ task.status }}">{{ task.status }}</span>
+    </div>
+</div>
+
+<div class="detail-grid">
+    <div class="detail-box">
+        <div class="detail-label">Description</div>
+        <div class="detail-value">{{ task.description or "(none)" }}</div>
+    </div>
+    <div class="detail-box">
+        <div class="detail-label">Action</div>
+        <div class="detail-value">{{ task.action_name or "(none)" }}</div>
+    </div>
+    <div class="detail-box">
+        <div class="detail-label">Source</div>
+        <div class="detail-value">{{ task.source or "(none)" }}</div>
+    </div>
+    <div class="detail-box">
+        <div class="detail-label">Intent Version</div>
+        <div class="detail-value">{{ task.intent_version or "(none)" }}</div>
+    </div>
+    <div class="detail-box">
+        <div class="detail-label">Working Directory</div>
+        <div class="detail-value">{{ task.cwd or "(none)" }}</div>
+    </div>
+    <div class="detail-box">
+        <div class="detail-label">Env Keys</div>
+        <div class="detail-value">{{ (task.env_keys or []) | join(", ") or "(none)" }}</div>
+    </div>
+    {% if task.max_retries > 0 %}
+    <div class="detail-box">
+        <div class="detail-label">Retry</div>
+        <div class="detail-value">Attempt {{ task.retry_count + 1 }} of {{ task.max_retries + 1 }} &mdash; {{ task.retry_count }} of {{ task.max_retries }} retries used (delay: {{ task.retry_delay }}s)</div>
+    </div>
+    {% endif %}
+    <div class="detail-box full">
+        <div class="detail-label">Command</div>
+        <div class="detail-value"><pre>{{ task.command }}</pre></div>
+    </div>
+    <div class="detail-box full">
+        <div class="detail-label">Result</div>
+        <div class="detail-value"><pre>{{ task.result or "(none)" }}</pre></div>
+    </div>
+    <div class="detail-box full">
+        <div class="detail-label">Error</div>
+        <div class="detail-value"><pre>{{ task.error or "(none)" }}</pre></div>
+    </div>
+</div>
+
+<div class="form-actions">
+    <a href="/" class="btn">Back to Dashboard</a>
+    <form action="/tasks/{{ task.id }}/delete" method="post" style="margin:0">
+        <button type="submit" class="btn-danger" onclick="return confirm('Delete task {{ task.id }}?');">Delete Task</button>
+    </form>
+</div>
+{% endblock %}

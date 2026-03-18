@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Recurring Tasks — Mage Scheduler{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Recurring Tasks</h1>
+    <div class="sub">Cron-driven schedules that spawn a new task each time they fire. <a href="/recurring/new">New recurring task</a></div>
+</div>
+
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Cron</th>
+            <th>Timezone</th>
+            <th>Action / Command</th>
+            <th>Next Run</th>
+            <th>Last Run</th>
+            <th>Status</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for rt in tasks %}
+        <tr class="{{ '' if rt.enabled else 'row-disabled' }}">
+            <td class="muted">{{ rt.id }}</td>
+            <td><a href="/recurring/{{ rt.id }}/edit">{{ rt.name }}</a></td>
+            <td><code>{{ rt.cron }}</code></td>
+            <td>{{ rt.timezone }}</td>
+            <td>{{ rt.action_name or rt.command or "-" }}</td>
+            <td>{{ rt.next_run_at | local_time }}</td>
+            <td>{{ rt.last_run_at | local_time }}</td>
+            <td><span class="badge {{ 'badge-completed' if rt.enabled else 'badge-cancelled' }}">{{ "enabled" if rt.enabled else "disabled" }}</span></td>
+            <td style="white-space:nowrap">
+                <form action="/recurring/{{ rt.id }}/toggle" method="post" style="display:inline;margin:0">
+                    <button type="submit" class="{{ 'btn-danger' if rt.enabled else 'btn-primary' }}" style="margin-right:4px">{{ "Disable" if rt.enabled else "Enable" }}</button>
+                </form>
+                <form action="/recurring/{{ rt.id }}/delete" method="post" style="display:inline;margin:0">
+                    <button type="submit" class="btn-danger" onclick="return confirm('Delete recurring task {{ rt.name }}?');">Delete</button>
+                </form>
+            </td>
+        </tr>
+    {% else %}
+        <tr><td colspan="9" class="muted">No recurring tasks yet. <a href="/recurring/new">Create one.</a></td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endblock %}

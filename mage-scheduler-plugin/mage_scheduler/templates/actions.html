@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Actions — Mage Scheduler{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Actions</h1>
+    <div class="sub">Named command templates that can be scheduled safely. <a href="/actions/new">New action</a></div>
+</div>
+
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Command</th>
+            <th>Default CWD</th>
+            <th>Allowed Env</th>
+            <th>Allowed Command Dirs</th>
+            <th>Allowed CWD Dirs</th>
+            <th>Created</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for action in actions %}
+        <tr>
+            <td><strong>{{ action.name }}</strong></td>
+            <td class="muted">{{ action.description or "-" }}</td>
+            <td><code>{{ action.command }}</code></td>
+            <td class="muted">{{ action.default_cwd or "-" }}</td>
+            <td class="muted">{{ (action.allowed_env or []) | join(", ") }}</td>
+            <td class="muted">{{ (action.allowed_command_dirs or []) | join(", ") }}</td>
+            <td class="muted">{{ (action.allowed_cwd_dirs or []) | join(", ") }}</td>
+            <td class="muted">{{ action.created_at | local_time }}</td>
+            <td style="white-space:nowrap">
+                <a href="/actions/{{ action.id }}/edit" class="btn" style="margin-right:4px">Edit</a>
+                <form action="/actions/{{ action.id }}/delete" method="post" style="display:inline;margin:0">
+                    <button type="submit" class="btn-danger" onclick="return confirm('Delete action {{ action.name }}?');">Delete</button>
+                </form>
+            </td>
+        </tr>
+    {% else %}
+        <tr><td colspan="9" class="muted">No actions yet. <a href="/actions/new">Create one.</a></td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endblock %}
