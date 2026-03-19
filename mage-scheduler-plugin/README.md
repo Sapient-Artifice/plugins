@@ -28,7 +28,7 @@ Drop the directory into `~/Mage/Skills/mage-scheduler/` and it works.
 cp -r mage_scheduler_plugin ~/Mage/Skills/mage-scheduler
 ```
 
-That's it. The plugin activates automatically the next time Claude Code starts (or when you reload plugins). The backend server starts on first use and persists between sessions — scheduled tasks continue firing even when Claude Code is closed.
+That's it. The plugin activates automatically the next time mage lab starts (or when you reload plugins). The backend server starts on first use and persists between sessions — scheduled tasks continue firing even when mage lab is closed.
 
 ### Requirements
 
@@ -42,7 +42,7 @@ All Python dependencies are managed by `pyproject.toml` and installed automatica
 ## How It Works
 
 ```
-Claude Code
+Mage Lab
     │
     ├── MCP stdio  ──►  mcp_server/__main__.py
     │                        │ starts (if not running)
@@ -59,7 +59,7 @@ Claude Code
     └── /scheduler  ──►  commands/scheduler.md  (slash command)
 ```
 
-**MCP server startup:** When Claude Code activates the plugin, `mcp_server/__main__.py` delegates to `mcp_server/backend.py` to check if the FastAPI backend is already running on the configured port. If not, `backend.py` spawns a `uvicorn` subprocess with `start_new_session=True` (detached from the MCP process), waits up to 15 seconds for it to become healthy, then the MCP stdio server starts. On subsequent activations the backend is already running and the health check passes immediately. The `scheduler_restart_backend` MCP tool uses the same `backend.py` logic to kill and respawn the backend on demand.
+**MCP server startup:** When mage lab activates the plugin, `mcp_server/__main__.py` delegates to `mcp_server/backend.py` to check if the FastAPI backend is already running on the configured port. If not, `backend.py` spawns a `uvicorn` subprocess with `start_new_session=True` (detached from the MCP process), waits up to 15 seconds for it to become healthy, then the MCP stdio server starts. On subsequent activations the backend is already running and the health check passes immediately. The `scheduler_restart_backend` MCP tool uses the same `backend.py` logic to kill and respawn the backend on demand.
 
 **Task execution:** Each task is stored as a `TaskRequest` row with `status = "scheduled"`. APScheduler fires `run_command(task_id, command)` at the scheduled time. The job reads the row, runs the command as a subprocess, writes stdout/stderr back to the row, and updates the status to `success` or `failed`.
 
@@ -187,7 +187,7 @@ All 21 tools are available via the `scheduler` MCP server. The naming convention
 
 ## Slash Command
 
-Type `/scheduler` in Claude Code to open the dashboard or schedule from natural language:
+Type `/scheduler` in mage lab to open the dashboard or schedule from natural language:
 
 ```
 /scheduler open                          → opens dashboard
