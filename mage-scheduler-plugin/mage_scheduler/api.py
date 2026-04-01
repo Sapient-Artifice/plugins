@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import time
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -106,7 +107,7 @@ INTENT_ERROR_HINTS = {
     "command_required": "Provide an absolute command path.",
     "command_invalid": "Provide a valid command string.",
     "command_must_be_absolute": "Use an absolute path like /usr/local/bin/tool.",
-    "command_not_found": "Verify the command path exists on the host.",
+    "command_not_found": "Install the command or provide the full absolute path.",
     "command_not_executable": "Ensure the command has execute permissions.",
     "command_dir_not_allowed": "Move the command under an allowed directory.",
     "cwd_must_be_absolute": "Use an absolute path like /var/tmp.",
@@ -225,7 +226,12 @@ def _get_settings(session: Session) -> Settings:
     return settings
 
 
-def _validate_command(command: str, allowed_dirs: list[str] | None = None) -> None:
+def _validate_command(command: str, allowed_dirs: list[str] | None = None) -> str:
+    """Validate command, resolving bare executable names via PATH.
+
+    Returns the resolved command string (absolute path substituted for bare name).
+    Raises HTTPException on validation failure.
+    """
     if not command:
         raise HTTPException(status_code=400, detail="command_required")
     try:
@@ -236,7 +242,11 @@ def _validate_command(command: str, allowed_dirs: list[str] | None = None) -> No
         raise HTTPException(status_code=400, detail="command_invalid")
     executable = tokens[0]
     if not os.path.isabs(executable):
-        raise HTTPException(status_code=400, detail="command_must_be_absolute")
+        resolved = shutil.which(executable)
+        if resolved is None:
+            raise HTTPException(status_code=400, detail="command_not_found")
+        command = resolved + command[len(executable):]
+        executable = resolved
     if not os.path.exists(executable):
         raise HTTPException(status_code=400, detail="command_not_found")
     if not os.access(executable, os.X_OK):
@@ -244,6 +254,7 @@ def _validate_command(command: str, allowed_dirs: list[str] | None = None) -> No
     if allowed_dirs:
         if not _is_path_allowed(executable, allowed_dirs):
             raise HTTPException(status_code=400, detail="command_dir_not_allowed")
+    return command
 
 
 def _get_executable(command: str) -> str:
@@ -369,19 +380,19 @@ def _validate_dirs_list(dirs_list: list[str] | None, error_code: str) -> None:
 def _validate_action_payload(
     payload: ActionCreate | ActionUpdate,
     settings: Settings,
-) -> tuple[list[str] | None, list[str] | None]:
+) -> str:
     allowed_command_dirs = payload.allowed_command_dirs
     allowed_cwd_dirs = payload.allowed_cwd_dirs
     _validate_dirs_list(allowed_command_dirs, "action_command_dirs_invalid")
     _validate_dirs_list(allowed_cwd_dirs, "action_cwd_dirs_invalid")
-    _validate_command(payload.command, settings.allowed_command_dirs)
+    resolved_command = _validate_command(payload.command, settings.allowed_command_dirs)
     _validate_cwd(payload.default_cwd, settings.allowed_cwd_dirs)
     if allowed_command_dirs:
         if settings.allowed_command_dirs:
             for item in allowed_command_dirs:
                 if not _is_path_allowed(item, settings.allowed_command_dirs):
                     raise HTTPException(status_code=400, detail="action_command_dir_outside_settings")
-        executable = _get_executable(payload.command)
+        executable = _get_executable(resolved_command)
         if not _is_path_allowed(executable, allowed_command_dirs):
             raise HTTPException(status_code=400, detail="action_command_dir_mismatch")
     if allowed_cwd_dirs:
@@ -391,7 +402,7 @@ def _validate_action_payload(
                     raise HTTPException(status_code=400, detail="action_cwd_dir_outside_settings")
         if payload.default_cwd and not _is_path_allowed(payload.default_cwd, allowed_cwd_dirs):
             raise HTTPException(status_code=400, detail="action_cwd_dir_mismatch")
-    return allowed_command_dirs, allowed_cwd_dirs
+    return resolved_command
 
 
 def _dashboard_context(request: Request, db: Session, error: str | None = None, form: dict | None = None) -> dict:
@@ -878,7 +889,7 @@ def actions_create(
     with SessionLocal() as session:
         settings = _get_settings(session)
         try:
-            _validate_action_payload(
+            resolved_command = _validate_action_payload(
                 ActionCreate(
                     name=name,
                     description=description,
@@ -915,7 +926,7 @@ def actions_create(
             raise HTTPException(status_code=400, detail="Action name already exists")
         action = Action(
             name=name,
-            command=command,
+            command=resolved_command,
             description=description,
             default_cwd=default_cwd,
             allowed_env_json=json.dumps(allowed_env_list) if allowed_env_list else None,
@@ -973,7 +984,7 @@ def actions_update(
             raise HTTPException(status_code=404, detail="Action not found")
         settings = _get_settings(session)
         try:
-            _validate_action_payload(
+            resolved_command = _validate_action_payload(
                 ActionUpdate(
                     name=name,
                     description=description,
@@ -1011,7 +1022,7 @@ def actions_update(
             )
         allowed_env_list = _parse_allowed_env(allowed_env)
         action.name = name
-        action.command = command
+        action.command = resolved_command
         action.description = description
         action.default_cwd = default_cwd
         action.allowed_env_json = json.dumps(allowed_env_list) if allowed_env_list else None
@@ -1035,13 +1046,13 @@ def list_actions(db: Session = Depends(get_db)):
 @app.post("/api/actions", response_model=ActionRead)
 def create_action(payload: ActionCreate, db: Session = Depends(get_db)):
     settings = _get_settings(db)
-    _validate_action_payload(payload, settings)
+    resolved_command = _validate_action_payload(payload, settings)
     existing = db.execute(select(Action).where(Action.name == payload.name)).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="action_name_exists")
     action = Action(
         name=payload.name,
-        command=payload.command,
+        command=resolved_command,
         description=payload.description,
         default_cwd=payload.default_cwd,
         allowed_env_json=json.dumps(payload.allowed_env) if payload.allowed_env else None,
@@ -1067,14 +1078,14 @@ def update_action(action_id: int, payload: ActionUpdate, db: Session = Depends(g
     if action is None:
         raise HTTPException(status_code=404, detail="action_not_found")
     settings = _get_settings(db)
-    _validate_action_payload(payload, settings)
+    resolved_command = _validate_action_payload(payload, settings)
     existing = db.execute(
         select(Action).where(Action.name == payload.name, Action.id != action_id)
     ).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="action_name_exists")
     action.name = payload.name
-    action.command = payload.command
+    action.command = resolved_command
     action.description = payload.description
     action.default_cwd = payload.default_cwd
     action.allowed_env_json = json.dumps(payload.allowed_env) if payload.allowed_env else None
@@ -1171,10 +1182,9 @@ def _handle_recurring_intent(payload, session, normalized_intent_version, tzinfo
         allowed_command_dirs = action.allowed_command_dirs or settings.allowed_command_dirs
         allowed_cwd_dirs = action.allowed_cwd_dirs or settings.allowed_cwd_dirs
         try:
-            _validate_command(action.command, allowed_command_dirs)
+            resolved_command = _validate_command(action.command, allowed_command_dirs)
         except HTTPException as exc:
             return _blocked_recurring(str(exc.detail), action.command)
-        resolved_command = action.command
         action_id = action.id
         if resolved_cwd is None:
             resolved_cwd = action.default_cwd
@@ -1196,7 +1206,7 @@ def _handle_recurring_intent(payload, session, normalized_intent_version, tzinfo
         allowed_command_dirs = settings.allowed_command_dirs
         allowed_cwd_dirs = settings.allowed_cwd_dirs
         try:
-            _validate_command(resolved_command, allowed_command_dirs)
+            resolved_command = _validate_command(resolved_command, allowed_command_dirs)
         except HTTPException as exc:
             return _blocked_recurring(str(exc.detail), resolved_command)
         if env:
@@ -1325,10 +1335,9 @@ def create_task_from_intent(payload: TaskIntentEnvelope):
             allowed_command_dirs = action.allowed_command_dirs or settings.allowed_command_dirs
             allowed_cwd_dirs = action.allowed_cwd_dirs or settings.allowed_cwd_dirs
             try:
-                _validate_command(action.command, allowed_command_dirs)
+                resolved_command = _validate_command(action.command, allowed_command_dirs)
             except HTTPException as exc:
                 return _blocked(str(exc.detail), action.command)
-            resolved_command = action.command
             action_id = action.id
             if resolved_cwd is None:
                 resolved_cwd = action.default_cwd
@@ -1348,7 +1357,7 @@ def create_task_from_intent(payload: TaskIntentEnvelope):
             allowed_command_dirs = settings.allowed_command_dirs
             allowed_cwd_dirs = settings.allowed_cwd_dirs
             try:
-                _validate_command(resolved_command, allowed_command_dirs)
+                resolved_command = _validate_command(resolved_command, allowed_command_dirs)
             except HTTPException as exc:
                 return _blocked(str(exc.detail), resolved_command)
             if env:
