@@ -245,7 +245,7 @@ def _validate_command(command: str, allowed_dirs: list[str] | None = None) -> st
         resolved = shutil.which(executable)
         if resolved is None:
             raise HTTPException(status_code=400, detail="command_not_found")
-        command = resolved + command[len(executable):]
+        command = shlex.join([resolved] + tokens[1:])
         executable = resolved
     if not os.path.exists(executable):
         raise HTTPException(status_code=400, detail="command_not_found")
@@ -738,7 +738,7 @@ def worker_health() -> dict:
 def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
     settings = _get_settings(db)
     try:
-        _validate_command(payload.command, settings.allowed_command_dirs)
+        resolved_command = _validate_command(payload.command, settings.allowed_command_dirs)
         _validate_cwd(payload.cwd, settings.allowed_cwd_dirs)
     except HTTPException as exc:
         blocked = _create_blocked_task(
@@ -750,7 +750,7 @@ def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
         return blocked
     manager = TaskManager()
     task_id = manager.schedule_command(
-        payload.command,
+        resolved_command,
         payload.run_at,
         cwd=payload.cwd,
         env=payload.env,
@@ -775,7 +775,7 @@ def create_task(payload: TaskCreate, db: Session = Depends(get_db)):
 def run_task_now(payload: TaskRunNow, db: Session = Depends(get_db)):
     settings = _get_settings(db)
     try:
-        _validate_command(payload.command, settings.allowed_command_dirs)
+        resolved_command = _validate_command(payload.command, settings.allowed_command_dirs)
         _validate_cwd(payload.cwd, settings.allowed_cwd_dirs)
     except HTTPException as exc:
         blocked = _create_blocked_task(
@@ -787,7 +787,7 @@ def run_task_now(payload: TaskRunNow, db: Session = Depends(get_db)):
         return blocked
     manager = TaskManager()
     task_id = manager.schedule_command(
-        payload.command,
+        resolved_command,
         datetime.now(),
         cwd=payload.cwd,
         env=payload.env,

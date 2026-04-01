@@ -104,6 +104,16 @@ class TestValidateCommandResolution:
             _validate_command("")
         assert exc_info.value.detail == "command_required"
 
+    def test_bare_name_with_extra_whitespace_reconstructed_cleanly(self):
+        with patch("api.shutil.which", return_value="/usr/bin/python3"), \
+             patch("api.os.path.exists", return_value=True), \
+             patch("api.os.access", return_value=True):
+            result = _validate_command("python3  --flag  value")
+        # Result should be cleanly reconstructed, not contain double spaces
+        assert result.startswith("/usr/bin/python3")
+        assert "--flag" in result
+        assert "value" in result
+
 
 class TestIntentEndpointResolution:
     """Integration tests through the full intent endpoint."""
