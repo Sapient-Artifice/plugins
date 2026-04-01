@@ -6,11 +6,10 @@ Shared by __main__.py (startup) and tools.py (scheduler_restart_backend).
 from __future__ import annotations
 
 import os
+import subprocess
 import time
 import urllib.request
 from pathlib import Path
-
-import subprocess
 
 from mcp_server.platform_compat import (
     detached_popen_kwargs,
