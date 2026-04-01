@@ -323,8 +323,7 @@ def open_browser(url: str) -> None:
 uv run pytest tests/test_platform_compat.py -v
 ```
 
-Expected: all tests PASS. If `DETACHED_PROCESS` is not available in `subprocess` on Linux, mock it:  
-`subprocess.DETACHED_PROCESS` is defined on all platforms in Python 3.7+ (`0x00000008`). No conditional needed.
+Expected: all tests PASS. Note: `subprocess.DETACHED_PROCESS` and `subprocess.CREATE_NEW_PROCESS_GROUP` are Windows-only and absent on Linux/macOS. Use `getattr(subprocess, "DETACHED_PROCESS", 0x00000008)` and `getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)` in the implementation and tests.
 
 - [ ] **Step 5: Run full test suite to confirm no regressions**
 
