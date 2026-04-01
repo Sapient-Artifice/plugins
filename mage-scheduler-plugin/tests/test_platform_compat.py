@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import psutil
-import pytest
 
 import mcp_server.platform_compat as compat
 
