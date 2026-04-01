@@ -48,6 +48,11 @@ def _ask_assistant_command() -> str:
         venv_python = plugin_dir / ".venv" / "Scripts" / "python.exe"
     else:
         venv_python = plugin_dir / ".venv" / "bin" / "python"
+    if not venv_python.exists():
+        raise FileNotFoundError(
+            f"Virtual environment not found at {venv_python}. "
+            "Run the plugin install steps before starting the scheduler."
+        )
     return f"{venv_python} {script}"
 
 
