@@ -74,7 +74,8 @@ class TestValidateActionPayload:
 
     def _call(self, payload, settings, monkeypatch):
         import api as api_module
-        monkeypatch.setattr(api_module, "_validate_command", lambda *a, **kw: None)
+        # _validate_command now returns the resolved command string; pass it through unchanged.
+        monkeypatch.setattr(api_module, "_validate_command", lambda cmd, *a, **kw: cmd)
         monkeypatch.setattr(api_module, "_validate_cwd", lambda *a, **kw: None)
         return api_module._validate_action_payload(payload, settings)
 
@@ -178,15 +179,15 @@ class TestValidateActionPayload:
             self._call(payload, self._settings(), monkeypatch)
         assert exc_info.value.detail == "action_cwd_dir_mismatch"
 
-    def test_valid_payload_returns_dirs(self, tmp_path, monkeypatch):
-        """Clean payload with no optional dirs returns (None, None)."""
+    def test_valid_payload_returns_resolved_command(self, tmp_path, monkeypatch):
+        """Clean payload with no optional dirs returns the resolved command string."""
         from schemas import ActionCreate
         payload = ActionCreate(name="act", command="echo ok")
         result = self._call(payload, self._settings(), monkeypatch)
-        assert result == (None, None)
+        assert result == "echo ok"
 
-    def test_valid_payload_with_matching_dirs_returns_dirs(self, tmp_path, monkeypatch):
-        """Payload with matching dirs should succeed and return them."""
+    def test_valid_payload_with_matching_dirs_returns_resolved_command(self, tmp_path, monkeypatch):
+        """Payload with matching dirs should succeed and return the resolved command string."""
         from schemas import ActionCreate
 
         bin_dir = tmp_path / "bin"
@@ -200,7 +201,7 @@ class TestValidateActionPayload:
             allowed_command_dirs=[str(bin_dir)],
         )
         result = self._call(payload, self._settings(), monkeypatch)
-        assert result[0] == [str(bin_dir)]
+        assert result == str(exe)
 
 
 # ---------------------------------------------------------------------------

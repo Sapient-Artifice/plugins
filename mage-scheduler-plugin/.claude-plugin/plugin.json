@@ -1,0 +1,9 @@
+{
+  "name": "mage-scheduler",
+  "description": "Task scheduler plugin for Mage Lab — schedule commands, cron tasks, and dependency chains with no external services required.",
+  "version": "2.0.0",
+  "author": {
+    "name": "Mage Lab Community Tools Contributors"
+  },
+  "license": "MIT"
+}

@@ -1,8 +1,9 @@
 {
   "mcpServers": {
     "mage-scheduler": {
-      "command": "python3",
-      "args": ["bin/start_mcp.py"]
+      "command": "uv",
+      "args": ["run", "python", "-m", "mcp_server"]
     }
   }
 }
+

@@ -151,8 +151,10 @@ def api_client(monkeypatch):
     monkeypatch.setattr(scheduler, "start_scheduler", lambda: None)
     monkeypatch.setattr(scheduler, "stop_scheduler", lambda: None)
 
-    # Bypass filesystem checks — not relevant to logic tests
-    monkeypatch.setattr(api, "_validate_command", lambda *a, **kw: None)
+    # Bypass filesystem checks — not relevant to logic tests.
+    # _validate_command now returns the (possibly resolved) command string, so
+    # we pass the first positional argument through unchanged.
+    monkeypatch.setattr(api, "_validate_command", lambda cmd, *a, **kw: cmd)
     monkeypatch.setattr(api, "_validate_cwd", lambda *a, **kw: None)
 
     # Mock dispatch — no real APScheduler jobs during tests

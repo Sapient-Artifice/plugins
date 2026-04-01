@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -40,15 +41,19 @@ def init_db() -> None:
 
 
 def _ask_assistant_command() -> str:
-    """Return the canonical command for the ask_assistant action.
-
-    Uses the venv Python that owns this installation so the path stays correct
-    regardless of which machine or directory the plugin lives in.
-    """
+    """Return the canonical command for the ask_assistant action."""
     script = Path(__file__).resolve().parent / "scripts" / "ask_assistant.py"
-    venv_python = Path(__file__).resolve().parent.parent / ".venv" / "bin" / "python"
-    python = str(venv_python) if venv_python.exists() else "/usr/bin/python3"
-    return f"{python} {script}"
+    plugin_dir = Path(__file__).resolve().parent.parent
+    if sys.platform == "win32":
+        venv_python = plugin_dir / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_python = plugin_dir / ".venv" / "bin" / "python"
+    if not venv_python.exists():
+        raise FileNotFoundError(
+            f"Virtual environment not found at {venv_python}. "
+            "Run the plugin install steps before starting the scheduler."
+        )
+    return f"{venv_python} {script}"
 
 
 def _seed_default_actions() -> None:

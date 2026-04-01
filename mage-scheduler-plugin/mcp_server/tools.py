@@ -14,12 +14,11 @@ from __future__ import annotations
 
 import json
 import os
-import platform
-import subprocess
 from pathlib import Path
 from typing import Optional
 
 from mcp_server.backend import restart_backend, DATA_DIR as _BACKEND_DATA_DIR
+from mcp_server.platform_compat import open_browser
 
 import logging
 
@@ -109,10 +108,7 @@ def _open_in_app(url: str, panel: str = "panel") -> None:
             timeout=3,
         )
     except httpx.RequestError:
-        if platform.system() == "Darwin":
-            subprocess.Popen(["open", url])
-        else:
-            subprocess.Popen(["xdg-open", url])
+        open_browser(url)
 
 
 # ---------------------------------------------------------------------------

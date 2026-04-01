@@ -234,7 +234,7 @@ All scheduling goes through the `POST /api/tasks/intent` endpoint (or the `sched
 - Use `action_name` when a matching action exists; fall back to `command` for ad-hoc tasks.
 - Provide exactly one of `run_at`, `run_in`, or `cron`. Do not combine them.
 - `run_in` accepts natural duration strings: `"30m"`, `"2h"`, `"1d"`, `"1w"`.
-- `command` must be an absolute path (e.g. `/usr/bin/python3`, not `python3`).
+- `command` accepts bare names (`python3`, `ffmpeg`) or absolute paths. Bare names are resolved via `PATH` at schedule time and stored as absolute paths. If the name is not found on `PATH`, the request is blocked with `command_not_found`.
 - `env` is only allowed when `action_name` is set, and keys must be whitelisted by the action.
 - `timezone` defaults to `"UTC"`. Affects cron scheduling and response display only — storage is always UTC.
 - `cron` creates a `RecurringTask`. Incompatible with `run_at`, `run_in`, and `depends_on`.
@@ -513,14 +513,15 @@ The dashboard will be available at `http://127.0.0.1:8012`.
 
 ### Backend Persistence
 
-The uvicorn backend runs as a detached subprocess (`start_new_session=True`). It survives past the MCP server process and continues firing scheduled tasks between sessions. On next activation, the MCP server's health check detects it and skips the startup step.
+The uvicorn backend runs as a detached subprocess. It survives past the MCP server process and continues firing scheduled tasks between sessions. On next activation, the MCP server's health check detects it and skips the startup step.
 
-### Windows Compatibility
+### Platform Support
 
-The architecture is Windows-compatible in principle. Known remaining gaps:
+The plugin runs on Windows, macOS, and Linux. Platform-specific behaviour is isolated in `mcp_server/platform_compat.py`:
 
-- `signal.SIGTERM` is not available on Windows; cancellation of running tasks is best-effort.
-- Subprocess shell behaviour differs (`cmd.exe` vs `bash`); absolute paths are required.
-- File path separators in `allowed_command_dirs` checks use `os.path` and should be portable.
+- **Process management** uses `psutil` — no Unix-only `ss` command or `SIGKILL`.
+- **Detached subprocess** uses `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` on Windows, `start_new_session=True` on Unix.
+- **Browser open** uses `cmd /c start` on Windows, `open` on macOS, `xdg-open` on Linux.
+- **Venv path** resolves to `.venv\Scripts\python.exe` on Windows, `.venv/bin/python` on Unix.
 
-Full Windows support is tracked as a future improvement.
+Users on Windows schedule Windows commands; users on Unix schedule Unix commands. The plugin is a scheduler, not a shell abstraction layer.
