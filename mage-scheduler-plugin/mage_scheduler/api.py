@@ -1603,10 +1603,9 @@ def preview_task_intent(payload: TaskIntentEnvelope):
             allowed_command_dirs = action.allowed_command_dirs or settings.allowed_command_dirs
             allowed_cwd_dirs = action.allowed_cwd_dirs or settings.allowed_cwd_dirs
             try:
-                _validate_command(action.command, allowed_command_dirs)
+                resolved_command = _validate_command(action.command, allowed_command_dirs)
             except HTTPException as exc:
                 _raise_intent_validation([str(exc.detail)])
-            resolved_command = action.command
             if resolved_cwd is None:
                 resolved_cwd = action.default_cwd
             allowed_env = action.allowed_env or []
@@ -1624,7 +1623,7 @@ def preview_task_intent(payload: TaskIntentEnvelope):
             allowed_command_dirs = settings.allowed_command_dirs
             allowed_cwd_dirs = settings.allowed_cwd_dirs
         try:
-            _validate_command(payload.task.command, allowed_command_dirs)
+            resolved_command = _validate_command(payload.task.command, allowed_command_dirs)
         except HTTPException as exc:
             _raise_intent_validation([str(exc.detail)])
         if env:
@@ -1704,8 +1703,7 @@ def _recurring_from_payload(
             raise HTTPException(status_code=400, detail="unknown_action")
         allowed_command_dirs = action.allowed_command_dirs or settings.allowed_command_dirs
         allowed_cwd_dirs = action.allowed_cwd_dirs or settings.allowed_cwd_dirs
-        _validate_command(action.command, allowed_command_dirs)
-        resolved_command = action.command
+        resolved_command = _validate_command(action.command, allowed_command_dirs)
         if resolved_cwd is None:
             resolved_cwd = action.default_cwd
         allowed_env = action.allowed_env or []
@@ -1718,7 +1716,7 @@ def _recurring_from_payload(
     elif resolved_command:
         allowed_command_dirs = settings.allowed_command_dirs
         allowed_cwd_dirs = settings.allowed_cwd_dirs
-        _validate_command(resolved_command, allowed_command_dirs)
+        resolved_command = _validate_command(resolved_command, allowed_command_dirs)
         if env:
             raise HTTPException(status_code=400, detail="env_requires_action")
     else:
