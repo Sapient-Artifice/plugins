@@ -1,7 +1,35 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from pydantic import BaseModel
+
+
+def _default_tz() -> str:
+    """Return the default scheduling timezone.
+
+    Checks SCHEDULER_TIMEZONE env var first, then auto-detects from the
+    system clock. Falls back to 'UTC' if detection fails.
+    """
+    env_tz = os.environ.get("SCHEDULER_TIMEZONE", "").strip()
+    if env_tz:
+        try:
+            ZoneInfo(env_tz)
+            return env_tz
+        except Exception:
+            pass
+    try:
+        local_tz = datetime.now().astimezone().tzinfo
+        if hasattr(local_tz, "key") and local_tz.key:
+            return local_tz.key
+    except Exception:
+        pass
+    return "UTC"
+
+
+_DEFAULT_TZ = _default_tz()
 
 
 class ActionCreate(BaseModel):
@@ -53,7 +81,7 @@ class TaskIntent(BaseModel):
     command: str | None = None
     run_at: datetime | None = None
     run_in: str | None = None
-    timezone: str = "UTC"
+    timezone: str = _DEFAULT_TZ
     action_name: str | None = None
     cwd: str | None = None
     env: dict[str, str] | None = None
@@ -106,7 +134,7 @@ class RecurringTaskCreate(BaseModel):
     name: str
     description: str | None = None
     cron: str
-    timezone: str = "UTC"
+    timezone: str = _DEFAULT_TZ
     action_name: str | None = None
     command: str | None = None
     cwd: str | None = None
@@ -121,7 +149,7 @@ class RecurringTaskUpdate(BaseModel):
     name: str
     description: str | None = None
     cron: str
-    timezone: str = "UTC"
+    timezone: str = _DEFAULT_TZ
     action_name: str | None = None
     command: str | None = None
     cwd: str | None = None

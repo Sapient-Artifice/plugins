@@ -35,6 +35,7 @@ from schemas import (
     TaskIntentEnvelope,
     TaskIntentResponse,
     TaskRunNow,
+    _DEFAULT_TZ,
 )
 from task_manager import TaskManager
 from dispatch import cancel_command
@@ -457,7 +458,7 @@ def create_task_form(
     request: Request,
     run_date: str = Form(...),
     run_time: str = Form(...),
-    timezone: str = Form("UTC"),
+    timezone: str = Form(_DEFAULT_TZ),
     description: str | None = Form(None),
     action_id: int | None = Form(None),
     command: str | None = Form(None),
@@ -485,7 +486,7 @@ def create_task_form(
 
     # Timezone
     try:
-        tz = ZoneInfo(timezone or "UTC")
+        tz = ZoneInfo(timezone or _DEFAULT_TZ)
     except Exception:
         return _err("Invalid timezone. Use an IANA name like 'America/Los_Angeles'.")
 
@@ -560,7 +561,7 @@ def create_task_form(
             env=env,
             run_at=run_at_for_intent,
             cron=cron,
-            timezone=timezone or "UTC",
+            timezone=timezone or _DEFAULT_TZ,
         ),
         meta={"source": "dashboard-form"},
     )
@@ -1225,7 +1226,7 @@ def _handle_recurring_intent(payload, session, normalized_intent_version, tzinfo
         return _blocked_recurring("recurring_name_exists", resolved_command)
 
     source = payload.meta.get("source") if payload.meta else None
-    tz_name = task.timezone or "UTC"
+    tz_name = task.timezone or _DEFAULT_TZ
     next_run_at = compute_initial_next_run(task.cron, tz_name)
     # next_run_at is UTC-naive; convert to user's tz for the local display field
     next_run_at_local = next_run_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))
@@ -1853,7 +1854,7 @@ def recurring_create_form(
     request: Request,
     name: str = Form(...),
     cron: str = Form(...),
-    timezone: str = Form("UTC"),
+    timezone: str = Form(_DEFAULT_TZ),
     description: str | None = Form(None),
     action_name: str | None = Form(None),
     command: str | None = Form(None),
@@ -1917,7 +1918,7 @@ def recurring_update_form(
     recurring_id: int,
     name: str = Form(...),
     cron: str = Form(...),
-    timezone: str = Form("UTC"),
+    timezone: str = Form(_DEFAULT_TZ),
     description: str | None = Form(None),
     action_name: str | None = Form(None),
     command: str | None = Form(None),
