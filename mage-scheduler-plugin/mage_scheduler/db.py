@@ -53,7 +53,7 @@ def _ask_assistant_command() -> str:
             f"Virtual environment not found at {venv_python}. "
             "Run the plugin install steps before starting the scheduler."
         )
-    return f"{venv_python} {script}"
+    return f'"{venv_python}" "{script}"'
 
 
 def _seed_default_actions() -> None:
