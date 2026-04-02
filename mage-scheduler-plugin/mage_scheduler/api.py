@@ -1845,7 +1845,7 @@ def recurring_new(request: Request, db: Session = Depends(get_db)):
     actions = db.execute(select(Action).order_by(Action.name.asc())).scalars().all()
     return templates.TemplateResponse(
         "recurring_form.html",
-        {"request": request, "actions": actions, "form": {}, "editing": False},
+        {"request": request, "actions": actions, "form": {"timezone": _DEFAULT_TZ}, "editing": False},
     )
 
 

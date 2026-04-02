@@ -53,6 +53,9 @@ def _ask_assistant_command() -> str:
             f"Virtual environment not found at {venv_python}. "
             "Run the plugin install steps before starting the scheduler."
         )
+    # Double-quote both paths: handles spaces on cmd.exe (Windows) and sh (Unix),
+    # and preserves backslashes when shlex.split parses the command later.
+    # Both paths are derived from Path(__file__).resolve() so they never contain '"'.
     return f'"{venv_python}" "{script}"'
 
 

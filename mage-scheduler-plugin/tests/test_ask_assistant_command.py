@@ -10,77 +10,84 @@ from __future__ import annotations
 import shlex
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 
-def test_command_double_quotes_both_paths(tmp_path):
-    """Returned command must quote both the executable and the script."""
+def _make_venv(tmp_path: Path) -> Path:
+    """Create the venv Python binary expected by _ask_assistant_command."""
+    if sys.platform == "win32":
+        python = tmp_path / ".venv" / "Scripts" / "python.exe"
+    else:
+        python = tmp_path / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    return python
+
+
+def _make_script(tmp_path: Path) -> Path:
+    """Create the ask_assistant.py script expected by _ask_assistant_command."""
+    script = tmp_path / "mage_scheduler" / "scripts" / "ask_assistant.py"
+    script.parent.mkdir(parents=True)
+    script.touch()
+    return script
+
+
+def test_command_double_quotes_both_paths(tmp_path, monkeypatch):
+    """_ask_assistant_command must double-quote both paths."""
     import db
 
-    fake_python = tmp_path / ".venv" / "bin" / "python"
-    fake_python.parent.mkdir(parents=True)
-    fake_python.touch()
+    python = _make_venv(tmp_path)
+    _make_script(tmp_path)
+    monkeypatch.setattr(db, "__file__", str(tmp_path / "mage_scheduler" / "db.py"))
 
-    with patch("db.Path") as mock_path_cls:
-        # __file__ resolution chain: Path(__file__).resolve().parent gives mage_scheduler/
-        # .parent gives plugin_dir; / "scripts" / "ask_assistant.py" gives script
-        instance = mock_path_cls.return_value.resolve.return_value
-        script = instance.parent.__truediv__.return_value.__truediv__.return_value
-        plugin_dir = instance.parent.parent
-        if sys.platform == "win32":
-            venv_python = (
-                plugin_dir.__truediv__.return_value.__truediv__.return_value.__truediv__.return_value
-            )
-        else:
-            venv_python = (
-                plugin_dir.__truediv__.return_value.__truediv__.return_value.__truediv__.return_value
-            )
-        venv_python.exists.return_value = True
+    result = db._ask_assistant_command()
 
-        result = db._ask_assistant_command()
-
-    assert result.startswith('"'), "command must start with a double-quoted executable"
-    # shlex.split should produce exactly two tokens
+    assert result.startswith('"'), "executable must be double-quoted"
     tokens = shlex.split(result)
     assert len(tokens) == 2
+    assert tokens[0] == str(python)
 
 
-def test_command_with_spaces_in_path_survives_shlex_split():
-    """Paths containing spaces must round-trip through shlex.split correctly."""
+def test_command_with_spaces_in_path(tmp_path, monkeypatch):
+    """Paths containing spaces must survive shlex.split and shell execution."""
     import db
 
+    # Use a tmp_path that contains a space-like segment by renaming after creation
+    spaced = tmp_path / "my plugin"
+    spaced.mkdir()
+
     if sys.platform == "win32":
-        fake_python = Path(r"C:\Users\My User\plugin\.venv\Scripts\python.exe")
-        fake_script = Path(r"C:\Users\My User\plugin\mage_scheduler\scripts\ask_assistant.py")
+        python = spaced / ".venv" / "Scripts" / "python.exe"
     else:
-        fake_python = Path("/home/my user/plugin/.venv/bin/python")
-        fake_script = Path("/home/my user/plugin/mage_scheduler/scripts/ask_assistant.py")
+        python = spaced / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.touch()
 
-    with patch("db.Path") as mock_path_cls:
-        instance = mock_path_cls.return_value.resolve.return_value
-        instance.parent.__truediv__.return_value.__truediv__.return_value = fake_script
-        plugin_dir = instance.parent.parent
-        venv_python_mock = (
-            plugin_dir.__truediv__.return_value.__truediv__.return_value.__truediv__.return_value
-        )
-        venv_python_mock.__str__ = lambda s: str(fake_python)
-        venv_python_mock.exists.return_value = True
+    script = spaced / "mage_scheduler" / "scripts" / "ask_assistant.py"
+    script.parent.mkdir(parents=True)
+    script.touch()
 
-        # Manually build what the function would produce, since Path mock is complex
-        # Directly test the quoting format instead
-        command = f'"{fake_python}" "{fake_script}"'
+    monkeypatch.setattr(db, "__file__", str(spaced / "mage_scheduler" / "db.py"))
 
-    tokens = shlex.split(command)
-    assert tokens[0] == str(fake_python), "executable path must survive shlex.split intact"
-    assert tokens[1] == str(fake_script), "script path must survive shlex.split intact"
+    result = db._ask_assistant_command()
+
+    tokens = shlex.split(result)
+    assert len(tokens) == 2, (
+        f"path with space split into {len(tokens)} tokens instead of 2: {result!r}"
+    )
+    assert tokens[0] == str(python)
+    assert tokens[1] == str(script)
 
 
 def test_windows_backslashes_survive_shlex_split():
-    """Windows backslash paths inside double quotes must not be eaten by shlex."""
+    """Windows backslash paths inside double quotes must not be eaten by shlex.
+
+    This is a property test of the quoting format: verifies that the double-quote
+    wrapping used by _ask_assistant_command preserves backslashes correctly when
+    the resulting command string is later parsed by shlex.split (in _validate_command).
+    """
     python_path = r"C:\Users\My User\plugin\.venv\Scripts\python.exe"
     script_path = r"C:\Users\My User\plugin\mage_scheduler\scripts\ask_assistant.py"
 
-    # This is the format _ask_assistant_command must produce
     command = f'"{python_path}" "{script_path}"'
 
     tokens = shlex.split(command)

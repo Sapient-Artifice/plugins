@@ -236,7 +236,7 @@ All scheduling goes through the `POST /api/tasks/intent` endpoint (or the `sched
 - `run_in` accepts natural duration strings: `"30m"`, `"2h"`, `"1d"`, `"1w"`.
 - `command` accepts bare names (`python3`, `ffmpeg`) or absolute paths. Bare names are resolved via `PATH` at schedule time and stored as absolute paths. If the name is not found on `PATH`, the request is blocked with `command_not_found`.
 - `env` is only allowed when `action_name` is set, and keys must be whitelisted by the action.
-- `timezone` defaults to `"UTC"`. Affects cron scheduling and response display only — storage is always UTC.
+- `timezone` defaults to the server's local system timezone (set `SCHEDULER_TIMEZONE=America/New_York` to override). Affects cron scheduling and response display only — storage is always UTC.
 - `cron` creates a `RecurringTask`. Incompatible with `run_at`, `run_in`, and `depends_on`.
 - `replace_existing: true` cancels any existing `scheduled` or `waiting` tasks with the same description before creating the new one.
 
@@ -330,6 +330,7 @@ Set in `.claude-plugin/plugin.json` under `mcpServers.env`, or export before sta
 | `SCHEDULER_DATA_DIR` | `~/.mage_scheduler` | Directory for the SQLite database and log file |
 | `SCHEDULER_PORT` | `8012` | Port the FastAPI backend listens on |
 | `SCHEDULER_HOST` | `127.0.0.1` | Bind address for the FastAPI backend |
+| `SCHEDULER_TIMEZONE` | system local tz | Default timezone for scheduling (IANA name, e.g. `America/New_York`). Auto-detected on macOS/Linux; set explicitly on Windows. |
 
 The backend log is written to `$SCHEDULER_DATA_DIR/scheduler.log`. If the backend fails to start, check there first.
 
