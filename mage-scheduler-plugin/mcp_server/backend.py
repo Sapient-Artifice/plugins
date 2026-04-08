@@ -48,15 +48,18 @@ def _start_backend() -> subprocess.Popen:
            if k not in ("PYTHONPATH", "VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT")}
     env["SCHEDULER_DATA_DIR"] = str(DATA_DIR)
 
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         [str(python), "-m", "uvicorn", "api:app",
          "--host", HOST, "--port", str(PORT), "--log-level", "warning"],
         cwd=str(BACKEND_DIR),
+        stdin=subprocess.DEVNULL,
         stdout=log_file,
         stderr=log_file,
         env=env,
         **detached_popen_kwargs(),
     )
+    log_file.close()
+    return proc
 
 
 def _wait_for_ready(timeout_secs: int = 15) -> bool:

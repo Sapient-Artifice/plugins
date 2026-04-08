@@ -13,7 +13,7 @@ import psutil
 
 # Windows-only subprocess constants; define fallback values on other platforms
 # so that the module can be imported and tested cross-platform.
-_DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+_CREATE_NO_WINDOW = 0x08000000
 _CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 
 
@@ -27,8 +27,10 @@ def venv_python_path(plugin_dir: Path) -> Path:
 def detached_popen_kwargs() -> dict:
     """Return Popen kwargs for spawning a detached background process."""
     if sys.platform == "win32":
+        # CREATE_NO_WINDOW unconditionally suppresses the console window, unlike
+        # DETACHED_PROCESS which fails when the parent has no console (e.g. Tauri).
         return {
-            "creationflags": _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
+            "creationflags": _CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP
         }
     return {"start_new_session": True}
 
