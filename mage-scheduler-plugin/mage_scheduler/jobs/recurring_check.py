@@ -18,7 +18,7 @@ from models import RecurringTask, TaskRequest
 def check_recurring_tasks() -> None:
     """Beat job: fire any recurring tasks that are due, then advance next_run_at."""
     init_db()
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
     with SessionLocal() as session:
         due = session.execute(
@@ -50,7 +50,7 @@ def _compute_next_run(cron: str, tz_name: str, from_dt: datetime) -> datetime:
 
 def compute_initial_next_run(cron: str, tz_name: str) -> datetime:
     """Compute the first next_run_at for a newly created recurring task."""
-    return _compute_next_run(cron, tz_name, datetime.utcnow())
+    return _compute_next_run(cron, tz_name, datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 def _spawn_task(session, rt: RecurringTask, now_utc: datetime) -> None:

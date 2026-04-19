@@ -89,6 +89,10 @@ def run_command(task_request_id: int, command: str) -> dict:
     env["SCHEDULER_ACTION_NAME"] = action_name
     env["SCHEDULER_DESCRIPTION"] = description
 
+    # shell=True is intentional: users author these commands themselves and
+    # expect shell features (pipes, redirects, &&, etc.) to work as written.
+    # Commands are validated and resolved at schedule time; they are not built
+    # from untrusted external input, so the injection risk is acceptable.
     result = subprocess.run(
         command,
         shell=True,

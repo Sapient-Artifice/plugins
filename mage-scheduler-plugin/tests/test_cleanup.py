@@ -17,7 +17,7 @@ The cln_mem_db fixture is defined in conftest.py.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -69,7 +69,7 @@ class TestDoCleanup:
         from jobs.cleanup import _do_cleanup
 
         _make_settings(db_session, cleanup_enabled=0)
-        cutoff = datetime.utcnow() - timedelta(days=60)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
         _make_terminal_task(db_session, status="success", created_at=cutoff - timedelta(days=1))
         db_session.commit()
 
@@ -80,7 +80,7 @@ class TestDoCleanup:
         from models import TaskRequest
 
         _make_settings(db_session, retention_days=30)
-        old_date = datetime.utcnow() - timedelta(days=31)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=31)
         _make_terminal_task(db_session, status="success", created_at=old_date)
         db_session.commit()
 
@@ -94,7 +94,7 @@ class TestDoCleanup:
         from models import TaskRequest
 
         _make_settings(db_session, retention_days=30)
-        recent = datetime.utcnow() - timedelta(days=5)
+        recent = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=5)
         _make_terminal_task(db_session, status="success", created_at=recent)
         db_session.commit()
 
@@ -108,7 +108,7 @@ class TestDoCleanup:
         from models import TaskRequest
 
         _make_settings(db_session, retention_days=30)
-        old_date = datetime.utcnow() - timedelta(days=60)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
         _make_terminal_task(db_session, status="scheduled", created_at=old_date)
         db_session.commit()
 
@@ -120,7 +120,7 @@ class TestDoCleanup:
         from models import TaskRequest
 
         _make_settings(db_session, retention_days=30)
-        old_date = datetime.utcnow() - timedelta(days=60)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
         _make_terminal_task(db_session, status="success", retain_result=1, created_at=old_date)
         db_session.commit()
 
@@ -132,7 +132,7 @@ class TestDoCleanup:
         from models import TaskRequest
 
         _make_settings(db_session, retention_days=30)
-        old_date = datetime.utcnow() - timedelta(days=60)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
         for st in ("success", "failed", "cancelled", "blocked"):
             _make_terminal_task(db_session, status=st, created_at=old_date)
         db_session.commit()
@@ -148,8 +148,8 @@ class TestDoCleanup:
         from models import TaskRequest, TaskDependency
 
         _make_settings(db_session, retention_days=30)
-        old_date = datetime.utcnow() - timedelta(days=60)
-        recent_date = datetime.utcnow() - timedelta(days=5)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
+        recent_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=5)
 
         upstream = _make_terminal_task(db_session, status="success", created_at=old_date)
         downstream = _make_terminal_task(db_session, status="success", created_at=recent_date)
@@ -170,7 +170,7 @@ class TestDoCleanup:
         from models import TaskRequest, TaskDependency
 
         _make_settings(db_session, retention_days=30)
-        old_date = datetime.utcnow() - timedelta(days=60)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
 
         upstream = _make_terminal_task(db_session, status="success", created_at=old_date)
         downstream = _make_terminal_task(db_session, status="success", created_at=old_date)
@@ -191,7 +191,7 @@ class TestDoCleanup:
         from models import TaskRequest
 
         _make_settings(db_session, retention_days=0)
-        old_date = datetime.utcnow() - timedelta(days=31)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=31)
         _make_terminal_task(db_session, status="success", created_at=old_date)
         db_session.commit()
 
@@ -203,8 +203,8 @@ class TestDoCleanup:
         from models import TaskRequest
 
         _make_settings(db_session, retention_days=30)
-        old_date = datetime.utcnow() - timedelta(days=60)
-        recent_date = datetime.utcnow() - timedelta(days=5)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
+        recent_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=5)
 
         _make_terminal_task(db_session, status="success", created_at=old_date)
         _make_terminal_task(db_session, status="failed", created_at=old_date)
@@ -241,7 +241,7 @@ class TestCleanupOldTasksBeat:
 
         s = cln_mem_db()
         _make_settings(s, retention_days=30)
-        old_date = datetime.utcnow() - timedelta(days=60)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
         _make_terminal_task(s, status="success", created_at=old_date)
         s.commit()
         s.close()
@@ -265,7 +265,7 @@ class TestCleanupEndpoint:
         # Seed: cleanup disabled → no deletions
         s = Factory()
         _make_settings(s, cleanup_enabled=0)
-        old_date = datetime.utcnow() - timedelta(days=60)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
         _make_terminal_task(s, status="success", created_at=old_date)
         s.commit()
         s.close()
@@ -281,7 +281,7 @@ class TestCleanupEndpoint:
 
         s = Factory()
         _make_settings(s, retention_days=30)
-        old_date = datetime.utcnow() - timedelta(days=60)
+        old_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
         _make_terminal_task(s, status="success", created_at=old_date)
         s.commit()
         s.close()

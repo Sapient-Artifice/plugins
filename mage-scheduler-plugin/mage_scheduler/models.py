@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from sqlalchemy import Column, DateTime, Integer, Text
 from db import Base
@@ -13,7 +13,7 @@ class Action(Base):
     name = Column(Text, nullable=False, unique=True)
     description = Column(Text, nullable=True)
     command = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
     default_cwd = Column(Text, nullable=True)
     allowed_env_json = Column(Text, nullable=True)
     allowed_command_dirs_json = Column(Text, nullable=True)
@@ -82,7 +82,7 @@ class TaskRequest(Base):
     __tablename__ = "task_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
     description = Column(Text, nullable=False)
     command = Column(Text, nullable=False)
     run_at = Column(DateTime, nullable=False)
@@ -142,7 +142,7 @@ class RecurringTask(Base):
     enabled = Column(Integer, default=1, nullable=False)
     next_run_at = Column(DateTime, nullable=True)
     last_run_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     @property
     def env_keys(self) -> list[str] | None:

@@ -18,6 +18,7 @@ Drop the directory into `~/Mage/Skills/mage-scheduler/` and it works.
 - **Auto-cleanup** — configurable retention policy deletes old terminal tasks automatically.
 - **Web dashboard** — Jinja2-rendered HTML UI at `http://127.0.0.1:8012` for task/action/settings management.
 - **22 MCP tools** — full scheduling, inspection, and management surface exposed to the LLM via MCP stdio.
+
 - **`/scheduler` slash command** — natural language scheduling or dashboard access in one keystroke.
 
 ---
@@ -25,7 +26,7 @@ Drop the directory into `~/Mage/Skills/mage-scheduler/` and it works.
 ## Installation
 
 ```bash
-cp -r mage_scheduler_plugin ~/Mage/Skills/mage-scheduler
+cp -r mage-scheduler-plugin ~/Mage/Skills/mage-scheduler
 ```
 
 That's it. The plugin activates automatically the next time mage lab starts (or when you reload plugins). The backend server starts on first use and persists between sessions — scheduled tasks continue firing even when mage lab is closed.
@@ -131,7 +132,7 @@ The dependency beat job (`check_waiting_tasks`) re-evaluates all waiting tasks e
 
 ## MCP Tools
 
-All 21 tools are available via the `scheduler` MCP server. The naming convention is `scheduler_<action>`.
+All 22 tools are available via the `scheduler` MCP server. The naming convention is `scheduler_<action>`.
 
 ### Orientation
 | Tool | Description |

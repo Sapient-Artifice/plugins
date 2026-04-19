@@ -97,7 +97,7 @@ Hooks receive a JSON object on **stdin** with event-specific fields. All events 
 | `CLAUDE_PLUGIN_ROOT` | Absolute path to plugin directory (Claude Code name) |
 | `CLAUDE_PROJECT_DIR` | Current working directory |
 
-Additional event-specific env vars are documented in [SKILLS.md](../docs/SKILLS.md).
+Additional event-specific env vars are documented in the Mage Lab plugin documentation.
 
 If a hook writes valid JSON to **stdout**, the response is parsed and acted on. Both top-level fields and the `hookSpecificOutput` envelope are supported.
 

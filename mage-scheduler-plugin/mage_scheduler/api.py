@@ -57,7 +57,7 @@ async def _lifespan(application):
 app = FastAPI(title="Mage Scheduler", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r".*",
+    allow_origin_regex=r"https?://(127\.0\.0\.1|localhost)(:\d+)?",
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
@@ -148,10 +148,6 @@ def _parse_run_in(run_in: str) -> timedelta | None:
         return None
     return timedelta(seconds=seconds)
 
-
-@app.on_event("startup")
-def on_startup() -> None:
-    init_db()
 
 
 def get_db() -> Session:
@@ -289,7 +285,7 @@ def _create_blocked_task(
     task = TaskRequest(
         description=description,
         command=command,
-        run_at=datetime.utcnow(),
+        run_at=datetime.now(timezone.utc).replace(tzinfo=None),
         status="blocked",
         error=error_detail,
     )
@@ -1160,7 +1156,7 @@ def _handle_recurring_intent(payload, session, normalized_intent_version, tzinfo
             status="blocked",
             task_id=blocked.id,
             scheduled_at_local=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            scheduled_at_utc=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            scheduled_at_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             command=command_value,
             description=task.description,
             action_name=action_name,
@@ -1316,7 +1312,7 @@ def create_task_from_intent(payload: TaskIntentEnvelope):
                 status="blocked",
                 task_id=blocked.id,
                 scheduled_at_local=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-                scheduled_at_utc=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                scheduled_at_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 command=command_value,
                 description=payload.task.description,
                 action_name=action_name,

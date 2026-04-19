@@ -6,7 +6,7 @@ decorator replaced with a plain function called by APScheduler interval job.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -23,7 +23,7 @@ def _do_cleanup(session) -> int:
         return 0
 
     retention_days = settings.task_retention_days or 30
-    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=retention_days)
 
     candidates = session.execute(
         select(TaskRequest).where(

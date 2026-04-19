@@ -9,7 +9,8 @@ Skills in Mage combine LLM instructions with tools, letting you activate and dea
 ## Plugins
 
 | Plugin | Description |
-|mage-scheduler-plugin|allows LLM / user scheduled tasks, including recurrance and dependencies|
+|---|---|
+| `mage-scheduler-plugin` | allows LLM / user scheduled tasks, including recurrence and dependencies |
 | *(more coming soon)* | |
 
 ---

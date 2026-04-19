@@ -105,7 +105,7 @@ Rules:
 - `env` is only allowed with `action_name` and must be whitelisted by the action.
 - Commands and `cwd` must fall within allowed directories; `scheduler_context` includes these.
 - Use either `run_at` (datetime) or `run_in` (duration string) — not both. Omit both when `cron` is set.
-- `timezone` defaults to `"UTC"` if omitted.
+- `timezone` defaults to the server's local system timezone if omitted.
 - `cron` — 5-field cron expression (e.g. `"0 9 * * 1"` = Monday 9am). Creates a RecurringTask.
 - `depends_on` — list of `task_id` integers that must complete before this task runs.
 

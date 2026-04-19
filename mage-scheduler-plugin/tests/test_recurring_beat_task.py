@@ -5,7 +5,7 @@ dispatch.schedule_command mocking.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -71,7 +71,7 @@ class TestComputeInitialNextRun:
 
     def test_result_is_in_the_future(self):
         from jobs.recurring_check import compute_initial_next_run
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
         result = compute_initial_next_run("* * * * *", "UTC")
         assert result >= before
 
@@ -90,7 +90,7 @@ class TestSpawnTask:
         rt = make_recurring(s, command="echo ok")
         s.commit()
 
-        _spawn_task(s, rt, datetime.utcnow())
+        _spawn_task(s, rt, datetime.now(timezone.utc).replace(tzinfo=None))
         s.commit()
 
         tasks = s.execute(select(TaskRequest)).scalars().all()
@@ -124,7 +124,7 @@ class TestSpawnTask:
         rt = make_recurring(s, command="echo race")
         s.commit()
 
-        _spawn_task(s, rt, datetime.utcnow())
+        _spawn_task(s, rt, datetime.now(timezone.utc).replace(tzinfo=None))
 
         assert visibility_at_dispatch == [True], (
             "TaskRequest row was not committed before schedule_command was called"
@@ -146,7 +146,7 @@ class TestSpawnTask:
         rt = make_recurring(s, command="echo ok")
         s.commit()
 
-        _spawn_task(s, rt, datetime.utcnow())
+        _spawn_task(s, rt, datetime.now(timezone.utc).replace(tzinfo=None))
 
         assert len(calls) == 1
         called_task_id, called_command, _ = calls[0]
@@ -161,7 +161,7 @@ class TestSpawnTask:
         rt = make_recurring(s, command="echo ok")
         s.commit()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         _spawn_task(s, rt, now)
 
         assert rt.last_run_at == now
@@ -180,7 +180,7 @@ class TestSpawnTask:
         rt.action_name = "my_act"
         s.commit()
 
-        _spawn_task(s, rt, datetime.utcnow())
+        _spawn_task(s, rt, datetime.now(timezone.utc).replace(tzinfo=None))
         s.commit()
 
         tasks = s.execute(select(TaskRequest)).scalars().all()
@@ -198,7 +198,7 @@ class TestSpawnTask:
         rt.action_name = "nonexistent"
         s.commit()
 
-        _spawn_task(s, rt, datetime.utcnow())
+        _spawn_task(s, rt, datetime.now(timezone.utc).replace(tzinfo=None))
         s.commit()
 
         assert len(s.execute(select(TaskRequest)).scalars().all()) == 0
@@ -214,7 +214,7 @@ class TestSpawnTask:
         rt = make_recurring(s, command="")
         s.commit()
 
-        _spawn_task(s, rt, datetime.utcnow())
+        _spawn_task(s, rt, datetime.now(timezone.utc).replace(tzinfo=None))
         s.commit()
 
         assert len(s.execute(select(TaskRequest)).scalars().all()) == 0

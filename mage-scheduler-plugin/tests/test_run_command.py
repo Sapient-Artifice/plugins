@@ -138,7 +138,7 @@ class TestRunCommand:
         task = TaskRequest(
             description="test",
             command="echo ok",
-            run_at=datetime.utcnow(),
+            run_at=datetime.now(timezone.utc).replace(tzinfo=None),
             status="scheduled",
             max_retries=max_retries,
             retry_delay=retry_delay,
@@ -220,7 +220,7 @@ class TestRunCommand:
         factory = nt_mem_db
         s = _session(factory)
         task = TaskRequest(
-            description="t", command="echo ok", run_at=datetime.utcnow(),
+            description="t", command="echo ok", run_at=datetime.now(timezone.utc).replace(tzinfo=None),
             status="scheduled", max_retries=2, retry_count=2, retry_delay=60,
         )
         s.add(task)
@@ -245,7 +245,7 @@ class TestRunCommand:
         factory = nt_mem_db
         s = _session(factory)
         task = TaskRequest(
-            description="t", command="echo ok", run_at=datetime.utcnow(),
+            description="t", command="echo ok", run_at=datetime.now(timezone.utc).replace(tzinfo=None),
             status="cancelled",
         )
         s.add(task)
@@ -312,7 +312,7 @@ class TestRunCommand:
         task = TaskRequest(
             description="ping assistant",
             command="python3 ask_assistant.py",
-            run_at=datetime.utcnow(),
+            run_at=datetime.now(timezone.utc).replace(tzinfo=None),
             status="scheduled",
             max_retries=0,
             retry_count=0,
