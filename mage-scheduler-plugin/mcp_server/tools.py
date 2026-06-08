@@ -91,7 +91,14 @@ def _open_in_app(url: str, panel: str = "panel") -> None:
     and AJAX calls — then asks the mage-lab backend to open that file as a tab.
     Falls back to the system browser if the backend is unreachable.
     """
-    wrapper_path = _PLUGIN_DIR / f"mage_scheduler_{panel}.html"
+    # Write the wrapper to a directory that is both user-writable and on the
+    # mage-lab open_file allowlist. The plugin install dir fails both on packaged
+    # installer builds: it may be read-only (app bundle / Program Files), and it
+    # is only allowlisted when skills live under ~/Mage. ~/Mage is a hardcoded
+    # allowed root regardless of where skills are installed, and is writable.
+    wrapper_dir = Path.home() / "Mage" / ".mage_scheduler"
+    wrapper_dir.mkdir(parents=True, exist_ok=True)
+    wrapper_path = wrapper_dir / f"mage_scheduler_{panel}.html"
     wrapper_path.write_text(
         f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Mage Scheduler</title>
@@ -102,11 +109,16 @@ def _open_in_app(url: str, panel: str = "panel") -> None:
         encoding="utf-8",
     )
     try:
-        httpx.get(
-            f"{_MAGE_LAB_URL}/api/test_open_tab",
-            params={"path": str(wrapper_path)},
-            timeout=3,
+        resp = httpx.post(
+            f"{_MAGE_LAB_URL}/api/desktop/open_file",
+            json={"path": str(wrapper_path)},
+            headers={"Content-Type": "application/json", "Origin": "null"},
+            timeout=5,
         )
+        # Only RequestError (connection failure) raises; a 4xx/5xx returns a
+        # response, so check the status explicitly and fall back to the browser.
+        if resp.status_code >= 400:
+            open_browser(url)
     except httpx.RequestError:
         open_browser(url)
 
