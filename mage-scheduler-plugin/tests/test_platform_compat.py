@@ -46,9 +46,11 @@ class TestDetachedPopenKwargs:
         with patch("sys.platform", "win32"):
             result = compat.detached_popen_kwargs()
         assert "creationflags" in result
-        _DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        # CREATE_NO_WINDOW (not DETACHED_PROCESS) suppresses the console window
+        # without failing when the parent has no console (e.g. Tauri).
+        _CREATE_NO_WINDOW = 0x08000000
         _CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-        expected = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
+        expected = _CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP
         assert result["creationflags"] == expected
 
 
