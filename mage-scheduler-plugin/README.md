@@ -15,9 +15,10 @@ Drop the directory into `~/Mage/Skills/mage-scheduler/` and it works.
 - **Actions** — reusable, vetted command templates. Register once, schedule many times. Restrict allowed env keys and working directories per action.
 - **Retries** — configurable `max_retries` and `retry_delay` per task or action.
 - **Completion notifications** — opt-in per task; posts a structured result back to the assistant when the task finishes.
+- **Missed-task recovery** — tasks whose scheduled time passed while the backend was offline are rehydrated or surfaced for a run/skip decision instead of being silently lost. Configurable global policy.
 - **Auto-cleanup** — configurable retention policy deletes old terminal tasks automatically.
 - **Web dashboard** — Jinja2-rendered HTML UI at `http://127.0.0.1:8012` for task/action/settings management.
-- **22 MCP tools** — full scheduling, inspection, and management surface exposed to the LLM via MCP stdio.
+- **24 MCP tools** — full scheduling, inspection, and management surface exposed to the LLM via MCP stdio.
 
 - **`/scheduler` slash command** — natural language scheduling or dashboard access in one keystroke.
 
@@ -53,6 +54,7 @@ Mage Lab
     │                                   ├── APScheduler (in-process)
     │                                   │     ├── beat_recurring  (every 60s)
     │                                   │     ├── beat_dependency (every 60s)
+    │                                   │     ├── beat_reconcile  (every 60s + startup)
     │                                   │     └── beat_cleanup    (every 24h)
     │                                   │
     │                                   └── SQLite  (~/.mage_scheduler/scheduler.db)
@@ -63,6 +65,8 @@ Mage Lab
 **MCP server startup:** When mage lab activates the plugin, `mcp_server/__main__.py` delegates to `mcp_server/backend.py` to check if the FastAPI backend is already running on the configured port. If not, `backend.py` spawns a `uvicorn` subprocess with `start_new_session=True` (detached from the MCP process), waits up to 15 seconds for it to become healthy, then the MCP stdio server starts. On subsequent activations the backend is already running and the health check passes immediately. The `scheduler_restart_backend` MCP tool uses the same `backend.py` logic to kill and respawn the backend on demand.
 
 **Task execution:** Each task is stored as a `TaskRequest` row with `status = "scheduled"`. APScheduler fires `run_command(task_id, command)` at the scheduled time. The job reads the row, runs the command as a subprocess, writes stdout/stderr back to the row, and updates the status to `success` or `failed`.
+
+**Durability & missed tasks:** APScheduler's job store is in-memory, so one-off `date` jobs do not survive a backend restart. The `SQLite` `TaskRequest` rows are the durable record; `beat_reconcile` (run once at startup and every 60s thereafter) reconciles them against the live scheduler. On startup it **rehydrates** the jobs for tasks still due in the future, so a plain restart never drops them. A task whose `run_at` passed while the backend was offline (overdue by more than the configurable grace window) is a **missed** task: depending on the global `missed_task_policy` it is parked in the `missed` status for a run/skip decision (`always_ask`, the default), re-dispatched (`auto_run`), or cancelled (`auto_skip`). Recurring occurrences that come due while offline follow the same policy instead of firing late. When tasks are missed, the scheduler posts a summary notification to the assistant. See [Missed Tasks](#missed-tasks).
 
 ---
 
@@ -93,7 +97,7 @@ A **Task** (`TaskRequest`) is a single scheduled execution. Fields:
 | `description` | Human-readable label |
 | `command` | Shell command to run |
 | `run_at` | UTC datetime to execute |
-| `status` | `scheduled` → `running` → `success` / `failed` / `cancelled` |
+| `status` | `scheduled` → `running` → `success` / `failed` / `cancelled`; a run missed while offline becomes `missed` |
 | `job_id` | APScheduler job ID (used for cancellation) |
 | `result` | Captured stdout (truncated to 4000 chars) |
 | `error` | Captured stderr or failure reason |
@@ -128,11 +132,33 @@ Set `depends_on: [task_id, ...]` to hold a task as `waiting` until all upstream 
 
 The dependency beat job (`check_waiting_tasks`) re-evaluates all waiting tasks every 60 seconds.
 
+### Missed Tasks
+
+A task's scheduled run can be missed if the backend is offline (machine asleep, app closed, crash) when its `run_at` arrives. The reconcile beat (`reconcile_scheduled_tasks`) detects these and surfaces them instead of losing them silently.
+
+**What counts as missed:** a `scheduled` task with no live scheduler job, overdue by more than `missed_grace_seconds` (default 300s). A shorter delay is treated as effectively on-time and simply runs (covering the 60s beat latency and brief sleeps).
+
+**What happens** is governed by the global `missed_task_policy` setting:
+
+- `always_ask` (default) — the task is parked in the `missed` status and waits for a human decision.
+- `auto_run` — the task is re-dispatched to run immediately.
+- `auto_skip` — the task is cancelled and its dependents cascade-fail.
+
+Recurring occurrences that come due while offline follow the same policy rather than firing late. Whenever tasks are missed, the scheduler posts a single summary notification to the assistant (via `ask_assistant`).
+
+**Resolving a parked (`missed`) task:**
+
+- `scheduler_list_missed` — list everything awaiting a decision.
+- `scheduler_resolve_missed(task_id, "run")` — run it now (preserves the task ID and any dependents).
+- `scheduler_resolve_missed(task_id, "skip")` — cancel it and free the queue.
+
+`scheduler_status` also reports a `missed_task_count` as a safety net in case a notification is dropped. Configure the policy and grace window on the Settings page.
+
 ---
 
 ## MCP Tools
 
-All 22 tools are available via the `scheduler` MCP server. The naming convention is `scheduler_<action>`.
+All 24 tools are available via the `scheduler` MCP server. The naming convention is `scheduler_<action>`.
 
 ### Orientation
 | Tool | Description |
@@ -154,6 +180,8 @@ All 22 tools are available via the `scheduler` MCP server. The naming convention
 | `scheduler_get_task(task_id)` | Full task detail: output, error, retry count, dependencies |
 | `scheduler_get_dependencies(task_id)` | Dependency graph: `depends_on` + `blocking` lists |
 | `scheduler_cancel_task(task_id)` | Cancel a scheduled/running/waiting task |
+| `scheduler_list_missed` | List tasks parked in the `missed` state awaiting a decision |
+| `scheduler_resolve_missed(task_id, action)` | Resolve a missed task — `action` is `"run"` or `"skip"` |
 | `scheduler_cleanup` | Delete all terminal tasks now |
 
 ### Recurring Tasks
@@ -350,6 +378,8 @@ The FastAPI backend is also directly accessible. Base URL: `http://127.0.0.1:801
 | `POST` | `/api/tasks/run_now` | Schedule a task for immediate execution |
 | `POST` | `/api/tasks/intent` | Schedule via intent object (recommended) |
 | `POST` | `/api/tasks/{id}/cancel` | Cancel a task |
+| `GET` | `/api/tasks/missed` | List tasks parked in the `missed` state |
+| `POST` | `/api/tasks/{id}/resolve_missed` | Resolve a missed task (JSON body `{"action":"run"\|"skip"}`) |
 | `GET` | `/api/tasks/{id}/dependencies` | Get dependency graph for a task |
 | `GET` | `/api/tasks/stats` | Count tasks by status |
 | `POST` | `/api/tasks/cleanup` | Manually trigger cleanup |
@@ -433,13 +463,14 @@ mage_scheduler_plugin/
 │   │   ├── run_command.py       ← Task executor + dependency helpers + notify
 │   │   ├── dependency_check.py  ← Beat job: unblock waiting tasks
 │   │   ├── recurring_check.py   ← Beat job: spawn recurring task instances
+│   │   ├── reconcile.py         ← Beat job: rehydrate + detect missed tasks
 │   │   └── cleanup.py           ← Beat job: delete old terminal tasks
 │   └── templates/               ← Jinja2 HTML templates (dashboard, actions, settings)
 │
 ├── mcp_server/
 │   ├── __main__.py              ← Entry point: start backend → serve MCP stdio
 │   ├── backend.py               ← Backend process management (start, health-check, restart)
-│   └── tools.py                 ← 22 FastMCP tool definitions (httpx → REST API)
+│   └── tools.py                 ← 24 FastMCP tool definitions (httpx → REST API)
 │
 └── tests/
     ├── conftest.py              ← Pytest fixtures (in-memory DB, mocked scheduler)

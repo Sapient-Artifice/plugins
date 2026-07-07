@@ -121,6 +121,8 @@ def _migrate_schema() -> None:
             _add_column_if_missing(connection, "settings", settings_columns, "allowed_cwd_dirs_json", "TEXT")
             _add_column_if_missing(connection, "settings", settings_columns, "cleanup_enabled", "INTEGER NOT NULL DEFAULT 0")
             _add_column_if_missing(connection, "settings", settings_columns, "task_retention_days", "INTEGER NOT NULL DEFAULT 30")
+            _add_column_if_missing(connection, "settings", settings_columns, "missed_task_policy", "TEXT NOT NULL DEFAULT 'always_ask'")
+            _add_column_if_missing(connection, "settings", settings_columns, "missed_grace_seconds", "INTEGER NOT NULL DEFAULT 300")
 
 
 def _rename_column_if_exists(

@@ -1,7 +1,7 @@
 """
 Mage Scheduler MCP Tool Definitions
 =====================================
-21 tools exposed over the MCP stdio transport via FastMCP.
+Tools exposed over the MCP stdio transport via FastMCP.
 
 All tools communicate with the local FastAPI backend (running in a sibling
 uvicorn process started by __main__.py) using httpx. The backend URL is
@@ -145,15 +145,32 @@ def scheduler_status() -> str:
                 worker_ok = bool(resp.json().get("worker_alive"))
         except Exception:
             pass
-    return json.dumps(
-        {
-            "base_url": BASE_URL,
-            "api_alive": api_ok,
-            "worker_alive": worker_ok,
-            "ready": api_ok and worker_ok,
-        },
-        indent=2,
-    )
+
+    # Safety net: surface any tasks parked in the 'missed' state so a dropped
+    # startup notification never leaves them stranded and invisible.
+    missed_ids: list = []
+    if api_ok:
+        try:
+            resp = httpx.get(f"{BASE_URL}/api/tasks/missed", timeout=3)
+            if resp.is_success:
+                missed_ids = [t.get("id") for t in resp.json()]
+        except Exception:
+            pass
+
+    result = {
+        "base_url": BASE_URL,
+        "api_alive": api_ok,
+        "worker_alive": worker_ok,
+        "ready": api_ok and worker_ok,
+        "missed_task_count": len(missed_ids),
+    }
+    if missed_ids:
+        result["missed_task_ids"] = missed_ids
+        result["missed_hint"] = (
+            "Tasks missed their run while the scheduler was offline. Use "
+            "scheduler_list_missed for detail, then scheduler_resolve_missed."
+        )
+    return json.dumps(result, indent=2)
 
 
 @mcp.tool()
@@ -399,6 +416,43 @@ def scheduler_cancel_task(task_id: int) -> str:
     Cascades immediately: any tasks that depend on this one are failed.
     Cancelled tasks cannot be un-cancelled; create a new task if needed."""
     return _post(f"/api/tasks/{task_id}/cancel", {})
+
+
+@mcp.tool()
+def scheduler_list_missed() -> str:
+    """List tasks that missed their scheduled run while the scheduler was offline.
+
+    These are parked in the 'missed' state awaiting a decision. Each entry
+    includes id, description, run_at (the time it was supposed to run),
+    action_name, and command. Resolve each with scheduler_resolve_missed."""
+    raw = _get("/api/tasks/missed")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if isinstance(data, dict) and data.get("error"):
+        return raw
+    summary = [
+        {
+            "id": t.get("id"),
+            "description": t.get("description"),
+            "run_at": t.get("run_at"),
+            "action_name": t.get("action_name"),
+            "command": Path(t.get("command") or "").name or t.get("command"),
+        }
+        for t in data
+    ]
+    return json.dumps(summary, indent=2)
+
+
+@mcp.tool()
+def scheduler_resolve_missed(task_id: int, action: str) -> str:
+    """Resolve a missed task by ID.
+
+    action='run' re-dispatches the task to run immediately (preserving its ID
+    and any dependents). action='skip' cancels it and cascade-fails dependents,
+    freeing the queue. Only valid for tasks in the 'missed' state."""
+    return _post(f"/api/tasks/{task_id}/resolve_missed", {"action": action})
 
 
 @mcp.tool()

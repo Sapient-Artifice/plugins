@@ -58,6 +58,17 @@ class Settings(Base):
     allowed_cwd_dirs_json = Column(Text, nullable=True)
     cleanup_enabled = Column(Integer, default=0, nullable=False)
     task_retention_days = Column(Integer, default=30, nullable=False)
+    # How to handle a task whose scheduled run was missed while the scheduler
+    # was offline (overdue by more than missed_grace_seconds):
+    #   "always_ask" — park the task in the "missed" status and wait for a
+    #                  human run/skip decision (default).
+    #   "auto_run"   — re-dispatch the task immediately on detection.
+    #   "auto_skip"  — cancel the task and cascade-fail its dependents.
+    missed_task_policy = Column(Text, default="always_ask", nullable=False)
+    # Overdue threshold in seconds. A task overdue by <= this is treated as
+    # effectively on-time and simply runs (covers the 60s beat latency and
+    # brief sleeps); overdue by more than this triggers missed_task_policy.
+    missed_grace_seconds = Column(Integer, default=300, nullable=False)
 
     @property
     def allowed_command_dirs(self) -> list[str] | None:

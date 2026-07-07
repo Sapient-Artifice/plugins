@@ -47,7 +47,13 @@ Call `scheduler_context` first. It returns in one call:
 - `scheduler_get_task(task_id)` — full task detail: command, result output, error, retry count, deps
 - `scheduler_get_dependencies(task_id)` — dependency graph
 - `scheduler_cancel_task(task_id)` — cancel a scheduled/running/waiting task
+- `scheduler_list_missed` — list tasks that missed their run while the scheduler was offline (status `missed`)
+- `scheduler_resolve_missed(task_id, action)` — resolve a missed task; `action` is `"run"` (dispatch now) or `"skip"` (cancel)
 - `scheduler_cleanup` — delete all terminal tasks
+
+### Missed tasks
+
+If the scheduler was offline when a task was due, the run is not lost — it becomes a **missed** task. With the default policy the task is parked (status `missed`) and the assistant is notified. When the user asks about missed/overdue/lost tasks, or `scheduler_status` reports a non-zero `missed_task_count`, call `scheduler_list_missed`, help them decide, then `scheduler_resolve_missed(task_id, "run"|"skip")` for each. The policy (`always_ask` / `auto_run` / `auto_skip`) and grace window are configured on the Settings page.
 
 ### Recurring tasks
 - `scheduler_list_recurring` — list all recurring tasks with schedule, next run, enabled status
