@@ -99,7 +99,7 @@ A **Task** (`TaskRequest`) is a single scheduled execution. Fields:
 | `run_at` | UTC datetime to execute |
 | `status` | `scheduled` → `running` → `success` / `failed` / `cancelled`; a run missed while offline becomes `missed` |
 | `job_id` | APScheduler job ID (used for cancellation) |
-| `result` | Captured stdout (truncated to 4000 chars) |
+| `result` | Captured stdout (last 16000 chars retained if longer) |
 | `error` | Captured stderr or failure reason |
 | `action_name` | Source action if scheduled via an action |
 | `env_json` | JSON dict of env vars injected into the subprocess |

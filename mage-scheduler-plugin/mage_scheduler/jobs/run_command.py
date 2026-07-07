@@ -18,6 +18,16 @@ from models import TaskDependency, TaskRequest
 ASK_ASSISTANT_ENDPOINT = os.getenv("MAGE_ASK_ASSISTANT_URL", "http://127.0.0.1:11115/ask_assistant")
 NOTIFICATION_OUTPUT_MAX = 500
 NOTIFICATION_ERROR_MAX = 300
+# Cap stored stdout/stderr so a chatty command can't grow the SQLite DB without
+# bound. We keep the tail (where exit summaries and final errors usually land).
+RESULT_STORAGE_MAX = 16000
+
+
+def _truncate_output(text: str | None) -> str | None:
+    """Return text capped to the last RESULT_STORAGE_MAX chars, with a marker."""
+    if text is None or len(text) <= RESULT_STORAGE_MAX:
+        return text
+    return "[... truncated earlier output ...]\n" + text[-RESULT_STORAGE_MAX:]
 
 
 def _send_completion_notification(task: TaskRequest, returncode: int) -> None:
@@ -111,8 +121,8 @@ def run_command(task_request_id: int, command: str) -> dict:
         retry_delay_secs = task_request.retry_delay or 60
         retry_count = task_request.retry_count or 0
 
-        task_request.result = result.stdout.strip() if result.stdout else None
-        task_request.error = result.stderr.strip() if result.stderr else None
+        task_request.result = _truncate_output(result.stdout.strip() if result.stdout else None)
+        task_request.error = _truncate_output(result.stderr.strip() if result.stderr else None)
 
         if result.returncode != 0 and retry_count < max_retries:
             task_request.retry_count = retry_count + 1
