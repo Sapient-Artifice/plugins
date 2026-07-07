@@ -225,6 +225,43 @@ def _get_settings(session: Session) -> Settings:
     return settings
 
 
+# On Windows, POSIX shlex rules eat backslashes (C:\x → C:x) and shlex.join
+# emits single-quoted args that cmd.exe cannot parse. Tokenize and re-quote
+# with Windows-aware rules there; on POSIX the behavior is byte-identical to
+# the previous shlex.split / shlex.join.
+_IS_WINDOWS = os.name == "nt"
+
+
+def _split_command(command: str) -> list[str]:
+    """Tokenize a command string, correctly on both POSIX and Windows."""
+    if _IS_WINDOWS:
+        # posix=False keeps backslashes intact but retains surrounding quotes,
+        # so strip a matched pair to recover clean path tokens.
+        return [_strip_quotes(tok) for tok in shlex.split(command, posix=False)]
+    return shlex.split(command)
+
+
+def _strip_quotes(token: str) -> str:
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in ("'", '"'):
+        return token[1:-1]
+    return token
+
+
+def _quote_arg(arg: str) -> str:
+    if not _IS_WINDOWS:
+        return shlex.quote(arg)
+    # cmd.exe: wrap in double quotes when the arg is empty or has whitespace/quotes;
+    # backslashes are preserved literally and must not be escaped.
+    if arg == "" or any(ch in arg for ch in ' \t"'):
+        return '"' + arg.replace('"', '\\"') + '"'
+    return arg
+
+
+def _join_command(tokens: list[str]) -> str:
+    """Re-serialize tokens into a shell-runnable command for the host platform."""
+    return " ".join(_quote_arg(tok) for tok in tokens)
+
+
 def _validate_command(command: str, allowed_dirs: list[str] | None = None) -> str:
     """Validate command, resolving bare executable names via PATH.
 
@@ -234,7 +271,7 @@ def _validate_command(command: str, allowed_dirs: list[str] | None = None) -> st
     if not command:
         raise HTTPException(status_code=400, detail="command_required")
     try:
-        tokens = shlex.split(command)
+        tokens = _split_command(command)
     except ValueError:
         raise HTTPException(status_code=400, detail="command_invalid")
     if not tokens:
@@ -244,7 +281,7 @@ def _validate_command(command: str, allowed_dirs: list[str] | None = None) -> st
         resolved = shutil.which(executable)
         if resolved is None:
             raise HTTPException(status_code=400, detail="command_not_found")
-        command = shlex.join([resolved] + tokens[1:])
+        command = _join_command([resolved] + tokens[1:])
         executable = resolved
     if not os.path.exists(executable):
         raise HTTPException(status_code=400, detail="command_not_found")
@@ -258,7 +295,7 @@ def _validate_command(command: str, allowed_dirs: list[str] | None = None) -> st
 
 def _get_executable(command: str) -> str:
     try:
-        tokens = shlex.split(command)
+        tokens = _split_command(command)
     except ValueError:
         raise HTTPException(status_code=400, detail="command_invalid")
     if not tokens:
@@ -298,9 +335,12 @@ def _create_blocked_task(
 
 
 def _is_path_allowed(path: str, allowed_dirs: list[str]) -> bool:
-    normalized = os.path.realpath(path)
+    # normcase lowercases and normalizes separators on Windows (no-op on POSIX)
+    # so the allowlist matches the OS's own case-(in)sensitivity instead of
+    # rejecting C:\Tools vs c:\tools on Windows / case-insensitive macOS volumes.
+    normalized = os.path.normcase(os.path.realpath(path))
     for base in allowed_dirs:
-        base_path = os.path.realpath(base)
+        base_path = os.path.normcase(os.path.realpath(base))
         if normalized == base_path or normalized.startswith(base_path + os.sep):
             return True
     return False

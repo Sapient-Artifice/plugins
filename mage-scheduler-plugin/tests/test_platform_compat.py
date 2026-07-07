@@ -66,29 +66,60 @@ class TestFindPidOnPort:
         conn.pid = pid
         return conn
 
+    def _make_proc(self, pid: int, cmdline: list[str]):
+        proc = MagicMock()
+        proc.pid = pid
+        proc.info = {"cmdline": cmdline}
+        return proc
+
     def test_returns_pid_for_listening_connection(self):
         conn = self._make_conn(8012, "LISTEN", 1234)
         with patch.object(compat.psutil, "net_connections", return_value=[conn]):
             assert compat.find_pid_on_port(8012) == 1234
 
-    def test_returns_none_when_port_not_matched(self):
+    def test_falls_back_when_port_not_matched(self):
         conn = self._make_conn(9999, "LISTEN", 1234)
-        with patch.object(compat.psutil, "net_connections", return_value=[conn]):
+        with patch.object(compat.psutil, "net_connections", return_value=[conn]), \
+             patch.object(compat.psutil, "process_iter", return_value=[]):
             assert compat.find_pid_on_port(8012) is None
 
     def test_ignores_non_listening_connections(self):
         conn = self._make_conn(8012, "ESTABLISHED", 1234)
-        with patch.object(compat.psutil, "net_connections", return_value=[conn]):
+        with patch.object(compat.psutil, "net_connections", return_value=[conn]), \
+             patch.object(compat.psutil, "process_iter", return_value=[]):
             assert compat.find_pid_on_port(8012) is None
 
-    def test_returns_none_on_access_denied(self):
+    def test_access_denied_falls_back_to_cmdline_match(self):
+        """macOS: net_connections raises AccessDenied → match uvicorn by cmdline."""
+        proc = self._make_proc(4242, ["python", "-m", "uvicorn", "api:app",
+                                      "--host", "127.0.0.1", "--port", "8012"])
         with patch.object(compat.psutil, "net_connections",
-                          side_effect=psutil.AccessDenied(0)):
+                          side_effect=psutil.AccessDenied(0)), \
+             patch.object(compat.psutil, "process_iter", return_value=[proc]):
+            assert compat.find_pid_on_port(8012) == 4242
+
+    def test_fallback_ignores_uvicorn_on_a_different_port(self):
+        proc = self._make_proc(4242, ["python", "-m", "uvicorn", "api:app",
+                                      "--port", "9001"])
+        with patch.object(compat.psutil, "net_connections",
+                          side_effect=psutil.AccessDenied(0)), \
+             patch.object(compat.psutil, "process_iter", return_value=[proc]):
             assert compat.find_pid_on_port(8012) is None
 
-    def test_returns_none_on_exception(self):
+    def test_fallback_skips_processes_that_raise(self):
+        bad = MagicMock()
+        bad.pid = 1
+        type(bad).info = property(lambda self: (_ for _ in ()).throw(psutil.AccessDenied(1)))
+        good = self._make_proc(4242, ["python", "-m", "uvicorn", "api:app", "--port", "8012"])
         with patch.object(compat.psutil, "net_connections",
-                          side_effect=OSError("unexpected")):
+                          side_effect=psutil.AccessDenied(0)), \
+             patch.object(compat.psutil, "process_iter", return_value=[bad, good]):
+            assert compat.find_pid_on_port(8012) == 4242
+
+    def test_returns_none_on_exception_then_no_match(self):
+        with patch.object(compat.psutil, "net_connections",
+                          side_effect=OSError("unexpected")), \
+             patch.object(compat.psutil, "process_iter", return_value=[]):
             assert compat.find_pid_on_port(8012) is None
 
 

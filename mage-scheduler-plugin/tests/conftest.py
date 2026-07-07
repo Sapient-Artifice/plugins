@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 
 import pytest
@@ -9,6 +11,24 @@ from sqlalchemy.orm import sessionmaker
 
 # Point all DB writes at a throwaway temp path during tests
 os.environ.setdefault("SCHEDULER_DATA_DIR", "/tmp/mage_scheduler_plugin_test")
+
+
+@pytest.fixture(autouse=True)
+def _block_outbound_http(monkeypatch):
+    """Never make a real HTTP call during the test suite.
+
+    The scheduler's notification path (reconcile._notify and
+    run_command._send_completion_notification) POSTs to the live Mage
+    ask_assistant endpoint. Without this, running the suite while Mage is up
+    delivers spurious scheduler notifications about test fixtures (e.g. the
+    rt0/rt1/rt2 recurring tasks). Blocking urlopen at the transport level keeps
+    the suite hermetic. Tests that assert on notification/health behavior patch
+    urlopen themselves, which overrides this default for their scope.
+    """
+    def _blocked(*args, **kwargs):
+        raise urllib.error.URLError("outbound HTTP is disabled during tests")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _blocked)
 
 
 @pytest.fixture(scope="function")
