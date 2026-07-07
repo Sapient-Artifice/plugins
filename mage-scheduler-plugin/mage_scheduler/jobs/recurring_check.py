@@ -20,7 +20,18 @@ def check_recurring_tasks() -> None:
     init_db()
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
+    from jobs.reconcile import _load_policy, _notify
+
+    summary: dict[str, list] = {
+        "rehydrated": [],
+        "caught_up": [],
+        "missed": [],
+        "auto_run": [],
+        "auto_skip": [],
+    }
+
     with SessionLocal() as session:
+        policy, grace = _load_policy(session)
         due = session.execute(
             select(RecurringTask).where(
                 RecurringTask.enabled == 1,
@@ -29,9 +40,23 @@ def check_recurring_tasks() -> None:
         ).scalars().all()
 
         for rt in due:
-            _spawn_task(session, rt, now_utc)
+            overdue = (
+                (now_utc - rt.next_run_at).total_seconds()
+                if rt.next_run_at is not None
+                else 0
+            )
+            if overdue <= grace:
+                # On-time (or within beat latency): spawn and dispatch as usual.
+                _spawn_task(session, rt, now_utc)
+            else:
+                # This occurrence was missed while the scheduler was offline.
+                bucket = _spawn_missed_occurrence(session, rt, now_utc, policy)
+                if bucket is not None:
+                    summary[bucket[0]].append(bucket[1])
 
         session.commit()
+
+    _notify(summary, policy)
 
 
 def _compute_next_run(cron: str, tz_name: str, from_dt: datetime) -> datetime:
@@ -53,8 +78,8 @@ def compute_initial_next_run(cron: str, tz_name: str) -> datetime:
     return _compute_next_run(cron, tz_name, datetime.now(timezone.utc).replace(tzinfo=None))
 
 
-def _spawn_task(session, rt: RecurringTask, now_utc: datetime) -> None:
-    """Create a TaskRequest from a RecurringTask and schedule it immediately."""
+def _resolve_command(session, rt: RecurringTask) -> str:
+    """Resolve the command a recurring task should run (via its action if set)."""
     command = rt.command or ""
     if rt.action_name and not command:
         from models import Action
@@ -63,6 +88,12 @@ def _spawn_task(session, rt: RecurringTask, now_utc: datetime) -> None:
         ).scalar_one_or_none()
         if action is not None:
             command = action.command
+    return command
+
+
+def _spawn_task(session, rt: RecurringTask, now_utc: datetime) -> None:
+    """Create a TaskRequest from a RecurringTask and schedule it immediately."""
+    command = _resolve_command(session, rt)
 
     if not command:
         rt.last_run_at = now_utc
@@ -94,3 +125,62 @@ def _spawn_task(session, rt: RecurringTask, now_utc: datetime) -> None:
 
     rt.last_run_at = now_utc
     rt.next_run_at = _compute_next_run(rt.cron, rt.timezone, now_utc)
+
+
+def _spawn_missed_occurrence(
+    session, rt: RecurringTask, now_utc: datetime, policy: str
+) -> tuple[str, dict] | None:
+    """Handle a recurring occurrence that was missed while offline.
+
+    Creates a TaskRequest recording the missed occurrence and, per the global
+    policy, parks it (``always_ask`` → status ``missed``), re-dispatches it
+    (``auto_run``), or cancels it (``auto_skip``). Always advances the recurring
+    schedule so it does not re-fire every beat. Returns ``(bucket, brief)`` for
+    the notification summary, or ``None`` if there was nothing to run.
+    """
+    from jobs.reconcile import _brief
+
+    command = _resolve_command(session, rt)
+    if not command:
+        rt.last_run_at = now_utc
+        rt.next_run_at = _compute_next_run(rt.cron, rt.timezone, now_utc)
+        return None
+
+    intended = rt.next_run_at or now_utc
+    task_request = TaskRequest(
+        description=rt.description or rt.name,
+        command=command,
+        run_at=intended,  # the time it was supposed to run
+        status="missed",
+        action_name=rt.action_name,
+        cwd=rt.cwd,
+        env_json=rt.env_json,
+        notify_on_complete=rt.notify_on_complete,
+        max_retries=rt.max_retries,
+        retry_delay=rt.retry_delay,
+        recurring_task_id=rt.id,
+    )
+    session.add(task_request)
+    session.flush()
+
+    if policy == "auto_run":
+        task_request.status = "scheduled"
+        session.commit()  # worker must see the row before dispatch
+        from dispatch import schedule_command
+        now_aware = now_utc.replace(tzinfo=timezone.utc)
+        task_request.job_id = schedule_command(task_request.id, command, now_aware)
+        bucket = "auto_run"
+    elif policy == "auto_skip":
+        task_request.status = "cancelled"
+        task_request.error = (
+            "Skipped by policy: recurring occurrence missed while the "
+            "scheduler was offline."
+        )
+        bucket = "auto_skip"
+    else:  # always_ask
+        bucket = "missed"
+
+    brief = _brief(task_request)
+    rt.last_run_at = now_utc
+    rt.next_run_at = _compute_next_run(rt.cron, rt.timezone, now_utc)
+    return bucket, brief

@@ -205,6 +205,10 @@ class TaskRunNow(BaseModel):
     retain_result: bool = False
 
 
+class MissedResolution(BaseModel):
+    action: str  # "run" | "skip"
+
+
 class TaskRead(BaseModel):
     id: int
     created_at: datetime

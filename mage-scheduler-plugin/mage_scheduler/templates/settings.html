@@ -47,6 +47,32 @@
         </div>
     </fieldset>
 
+    <fieldset>
+        <legend>Missed Tasks</legend>
+        <p class="muted" style="margin-bottom:12px">
+            When the scheduler is offline at a task's scheduled time, the run is
+            considered <em>missed</em>. Choose what happens when it is detected on
+            the next startup.
+        </p>
+        <div class="field">
+            <label for="missed_task_policy">Policy</label>
+            <select id="missed_task_policy" name="missed_task_policy">
+                <option value="always_ask" {% if settings.missed_task_policy == "always_ask" or not settings.missed_task_policy %}selected{% endif %}>Ask me (park until I run or skip it)</option>
+                <option value="auto_run" {% if settings.missed_task_policy == "auto_run" %}selected{% endif %}>Auto-run (dispatch immediately)</option>
+                <option value="auto_skip" {% if settings.missed_task_policy == "auto_skip" %}selected{% endif %}>Auto-skip (cancel it)</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="missed_grace_seconds">Grace Window (seconds)</label>
+            <div style="display:flex;align-items:center;gap:10px">
+                <input type="number" name="missed_grace_seconds" id="missed_grace_seconds"
+                       value="{{ settings.missed_grace_seconds if settings.missed_grace_seconds is not none else 300 }}"
+                       min="0" max="86400" style="width:90px">
+                <span class="muted">seconds (default: 300) &mdash; a run overdue by less than this is treated as on-time and simply runs.</span>
+            </div>
+        </div>
+    </fieldset>
+
     <div class="form-actions">
         <button type="submit" class="btn-primary">Save Settings</button>
     </div>

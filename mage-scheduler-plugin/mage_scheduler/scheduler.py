@@ -34,6 +34,7 @@ def start_scheduler() -> BackgroundScheduler:
     from jobs.recurring_check import check_recurring_tasks
     from jobs.dependency_check import check_waiting_tasks
     from jobs.cleanup import cleanup_old_tasks
+    from jobs.reconcile import reconcile_scheduled_tasks
 
     sched = get_scheduler()
     if sched.running:
@@ -60,7 +61,25 @@ def start_scheduler() -> BackgroundScheduler:
         id="beat_cleanup",
         replace_existing=True,
     )
+    sched.add_job(
+        reconcile_scheduled_tasks,
+        "interval",
+        seconds=60,
+        id="beat_reconcile",
+        replace_existing=True,
+    )
     sched.start()
+
+    # One-time full reconcile now that the scheduler is running but before any
+    # one-off jobs exist: rehydrate future tasks, catch up brief misses, and
+    # surface tasks missed while the process was offline. Safe from double-run
+    # races because no date jobs have been registered yet.
+    try:
+        reconcile_scheduled_tasks(startup=True)
+    except Exception:
+        # Startup reconcile is best-effort; the 60s beat will retry.
+        pass
+
     return sched
 
 

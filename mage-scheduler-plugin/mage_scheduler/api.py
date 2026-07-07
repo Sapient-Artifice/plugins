@@ -28,6 +28,7 @@ from schemas import (
     RecurringTaskCreate,
     RecurringTaskRead,
     RecurringTaskUpdate,
+    MissedResolution,
     TaskCreate,
     TaskDependencyRead,
     TaskRead,
@@ -40,6 +41,7 @@ from schemas import (
 from task_manager import TaskManager
 from dispatch import cancel_command
 from jobs.recurring_check import compute_initial_next_run
+from jobs.reconcile import run_missed_task, skip_missed_task
 from nl_parser import parse_request
 
 from contextlib import asynccontextmanager
@@ -613,6 +615,43 @@ def cancel_task(task_id: int, db: Session = Depends(get_db)):
     return {"status": "cancelled", "task_id": task_id}
 
 
+@app.get("/api/tasks/missed", response_model=list[TaskRead])
+def list_missed_tasks(db: Session = Depends(get_db)):
+    """List tasks parked in the 'missed' state awaiting a run/skip decision."""
+    return db.execute(
+        select(TaskRequest)
+        .where(TaskRequest.status == "missed")
+        .order_by(TaskRequest.run_at.asc())
+    ).scalars().all()
+
+
+@app.post("/api/tasks/{task_id}/resolve_missed")
+def resolve_missed_task(
+    task_id: int,
+    payload: MissedResolution,
+    db: Session = Depends(get_db),
+):
+    """Resolve a missed task by running it now or skipping (cancelling) it."""
+    task = db.get(TaskRequest, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status != "missed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task {task_id} is not in a 'missed' state (status='{task.status}').",
+        )
+    action = (payload.action or "").strip().lower()
+    if action == "run":
+        run_missed_task(db, task)
+        db.commit()
+        return {"status": "scheduled", "task_id": task_id}
+    if action == "skip":
+        skip_missed_task(db, task, "Skipped by user; task had missed its scheduled run.")
+        db.commit()
+        return {"status": "cancelled", "task_id": task_id}
+    raise HTTPException(status_code=400, detail="action must be 'run' or 'skip'")
+
+
 @app.post("/api/parse")
 def parse_nl_request(payload: dict):
     text = str(payload.get("text", "")).strip()
@@ -824,6 +863,8 @@ def settings_update(
     allowed_cwd_dirs: str | None = Form(None),
     cleanup_enabled: str | None = Form(None),
     task_retention_days: int | None = Form(None),
+    missed_task_policy: str | None = Form(None),
+    missed_grace_seconds: int | None = Form(None),
 ):
     allowed_command_dirs_list = _parse_allowed_dirs(allowed_command_dirs)
     allowed_cwd_dirs_list = _parse_allowed_dirs(allowed_cwd_dirs)
@@ -858,6 +899,10 @@ def settings_update(
         settings.cleanup_enabled = 1 if cleanup_enabled == "1" else 0
         if task_retention_days is not None:
             settings.task_retention_days = max(1, task_retention_days)
+        if missed_task_policy in ("always_ask", "auto_run", "auto_skip"):
+            settings.missed_task_policy = missed_task_policy
+        if missed_grace_seconds is not None:
+            settings.missed_grace_seconds = max(0, missed_grace_seconds)
         session.commit()
     return RedirectResponse(url="/settings", status_code=303)
 
