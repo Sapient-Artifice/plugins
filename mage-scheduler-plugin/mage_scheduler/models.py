@@ -21,6 +21,10 @@ class Action(Base):
     max_retries = Column(Integer, default=0, nullable=False)
     retry_delay = Column(Integer, default=60, nullable=False)
     retain_result = Column(Integer, default=0, nullable=False)
+    # Require an end-to-end receipt acknowledgment before a task counts as
+    # successful. On by default for the seeded ask_assistant action, whose
+    # HTTP 200 only means "queued to the frontend", not "received".
+    require_ack = Column(Integer, default=0, nullable=False)
 
     @property
     def allowed_env(self) -> list[str] | None:
@@ -69,6 +73,9 @@ class Settings(Base):
     # effectively on-time and simply runs (covers the 60s beat latency and
     # brief sleeps); overdue by more than this triggers missed_task_policy.
     missed_grace_seconds = Column(Integer, default=300, nullable=False)
+    # How long a require_ack task waits in 'awaiting_ack' for a receipt
+    # confirmation before it is parked as 'missed'.
+    ack_timeout_seconds = Column(Integer, default=900, nullable=False)
 
     @property
     def allowed_command_dirs(self) -> list[str] | None:
@@ -113,6 +120,12 @@ class TaskRequest(Base):
     retry_count = Column(Integer, default=0, nullable=False)
     recurring_task_id = Column(Integer, nullable=True)
     retain_result = Column(Integer, default=0, nullable=False)
+    # Receipt-acknowledgment gate (see Action.require_ack). When set, a
+    # successful delivery moves the task to 'awaiting_ack' with a one-time
+    # token and deadline instead of 'success'; a matching ack confirms it.
+    require_ack = Column(Integer, default=0, nullable=False)
+    ack_token = Column(Text, nullable=True)
+    ack_deadline = Column(DateTime, nullable=True)
 
     @property
     def env_keys(self) -> list[str] | None:
@@ -151,6 +164,7 @@ class RecurringTask(Base):
     max_retries = Column(Integer, default=0, nullable=False)
     retry_delay = Column(Integer, default=60, nullable=False)
     enabled = Column(Integer, default=1, nullable=False)
+    require_ack = Column(Integer, default=0, nullable=False)
     next_run_at = Column(DateTime, nullable=True)
     last_run_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)

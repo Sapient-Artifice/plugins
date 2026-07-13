@@ -456,6 +456,19 @@ def scheduler_resolve_missed(task_id: int, action: str) -> str:
 
 
 @mcp.tool()
+def scheduler_ack_task(task_id: int, token: str) -> str:
+    """Confirm receipt of a scheduled message that required acknowledgment.
+
+    Some scheduled tasks (e.g. ask_assistant deliveries) are only marked
+    successful once a live assistant confirms receipt — otherwise they are
+    parked as 'missed' for re-delivery. When you receive a scheduler message
+    instructing you to acknowledge, call this immediately with the task_id and
+    token from that message. Accepts a late ack for a task already parked as
+    'missed', as long as the token still matches."""
+    return _post(f"/api/tasks/{task_id}/ack", {"token": token})
+
+
+@mcp.tool()
 def scheduler_cleanup() -> str:
     """Delete all terminal tasks (succeeded, failed, cancelled, blocked).
 

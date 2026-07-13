@@ -112,10 +112,33 @@ def reconcile_scheduled_tasks(startup: bool = False) -> dict:
                 task.status = "missed"
                 summary["missed"].append(_brief(task))
 
+        _expire_awaiting_ack(session, now, summary)
+
         session.commit()
 
     _notify(summary, policy)
     return summary
+
+
+def _expire_awaiting_ack(session, now: datetime, summary: dict) -> None:
+    """Park delivered-but-unacknowledged tasks whose ack window has closed.
+
+    A require_ack task sits in 'awaiting_ack' until a live assistant confirms
+    receipt. If the deadline passes with no ack, nobody received it — treat it
+    like a missed task so it can be re-delivered later.
+    """
+    pending = session.execute(
+        select(TaskRequest).where(TaskRequest.status == "awaiting_ack")
+    ).scalars().all()
+    for task in pending:
+        deadline = _as_aware(task.ack_deadline)
+        if deadline is not None and deadline <= now:
+            task.status = "missed"
+            task.error = (
+                "Delivered but no receipt confirmation within the ack window; "
+                "nobody received it. Parked as missed for re-delivery."
+            )
+            summary["missed"].append(_brief(task))
 
 
 # ---------------------------------------------------------------------------
