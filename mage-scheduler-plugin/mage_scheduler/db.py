@@ -73,12 +73,17 @@ def _seed_default_actions() -> None:
                 description="Send a scheduled message to the assistant.",
                 command=command,
                 allowed_env_json=json.dumps(["MESSAGE"]),
+                require_ack=1,
             )
             session.add(action)
         else:
             # Keep the command current — stale paths cause silent failures after
             # the plugin is moved, renamed, or reinstalled on a new machine.
             existing.command = command
+            # ask_assistant delivery is fire-and-forget at the HTTP layer, so
+            # require a receipt ack to avoid recording "queued" as success.
+            if existing.require_ack != 1:
+                existing.require_ack = 1
         session.commit()
 
 
@@ -100,6 +105,9 @@ def _migrate_schema() -> None:
         _add_column_if_missing(connection, "task_requests", columns, "retry_count", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(connection, "task_requests", columns, "recurring_task_id", "INTEGER")
         _add_column_if_missing(connection, "task_requests", columns, "retain_result", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(connection, "task_requests", columns, "require_ack", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(connection, "task_requests", columns, "ack_token", "TEXT")
+        _add_column_if_missing(connection, "task_requests", columns, "ack_deadline", "DATETIME")
 
         action_columns = {
             row[1] for row in connection.exec_driver_sql("PRAGMA table_info(actions)").fetchall()
@@ -112,6 +120,7 @@ def _migrate_schema() -> None:
             _add_column_if_missing(connection, "actions", action_columns, "max_retries", "INTEGER NOT NULL DEFAULT 0")
             _add_column_if_missing(connection, "actions", action_columns, "retry_delay", "INTEGER NOT NULL DEFAULT 60")
             _add_column_if_missing(connection, "actions", action_columns, "retain_result", "INTEGER NOT NULL DEFAULT 0")
+            _add_column_if_missing(connection, "actions", action_columns, "require_ack", "INTEGER NOT NULL DEFAULT 0")
 
         settings_columns = {
             row[1] for row in connection.exec_driver_sql("PRAGMA table_info(settings)").fetchall()
@@ -123,6 +132,13 @@ def _migrate_schema() -> None:
             _add_column_if_missing(connection, "settings", settings_columns, "task_retention_days", "INTEGER NOT NULL DEFAULT 30")
             _add_column_if_missing(connection, "settings", settings_columns, "missed_task_policy", "TEXT NOT NULL DEFAULT 'always_ask'")
             _add_column_if_missing(connection, "settings", settings_columns, "missed_grace_seconds", "INTEGER NOT NULL DEFAULT 300")
+            _add_column_if_missing(connection, "settings", settings_columns, "ack_timeout_seconds", "INTEGER NOT NULL DEFAULT 900")
+
+        recurring_columns = {
+            row[1] for row in connection.exec_driver_sql("PRAGMA table_info(recurring_tasks)").fetchall()
+        }
+        if recurring_columns:
+            _add_column_if_missing(connection, "recurring_tasks", recurring_columns, "require_ack", "INTEGER NOT NULL DEFAULT 0")
 
 
 def _rename_column_if_exists(

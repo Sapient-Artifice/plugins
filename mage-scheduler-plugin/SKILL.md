@@ -49,7 +49,12 @@ Call `scheduler_context` first. It returns in one call:
 - `scheduler_cancel_task(task_id)` — cancel a scheduled/running/waiting task
 - `scheduler_list_missed` — list tasks that missed their run while the scheduler was offline (status `missed`)
 - `scheduler_resolve_missed(task_id, action)` — resolve a missed task; `action` is `"run"` (dispatch now) or `"skip"` (cancel)
+- `scheduler_ack_task(task_id, token)` — confirm receipt of an ack-required scheduled message (see below)
 - `scheduler_cleanup` — delete all terminal tasks
+
+### Receiving a scheduled message (IMPORTANT)
+
+When you receive a message headed `[MAGE SCHEDULER — AUTOMATED MESSAGE]` that says **"confirm receipt by calling `scheduler_ack_task(...)`"**, call `scheduler_ack_task(task_id, token)` with the exact values from that message **before doing anything else**. That confirmation is what marks the scheduled task successful. If you don't acknowledge, the scheduler assumes the message was never received and parks the task as `missed` for re-delivery — so skipping the ack causes duplicate deliveries later. Acknowledge first, then carry out whatever the message asks.
 
 ### Missed tasks
 

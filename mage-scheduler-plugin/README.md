@@ -18,7 +18,7 @@ Drop the directory into `~/Mage/Skills/mage-scheduler/` and it works.
 - **Missed-task recovery** — tasks whose scheduled time passed while the backend was offline are rehydrated or surfaced for a run/skip decision instead of being silently lost. Configurable global policy.
 - **Auto-cleanup** — configurable retention policy deletes old terminal tasks automatically.
 - **Web dashboard** — Jinja2-rendered HTML UI at `http://127.0.0.1:8012` for task/action/settings management.
-- **24 MCP tools** — full scheduling, inspection, and management surface exposed to the LLM via MCP stdio.
+- **25 MCP tools** — full scheduling, inspection, and management surface exposed to the LLM via MCP stdio.
 
 - **`/scheduler` slash command** — natural language scheduling or dashboard access in one keystroke.
 
@@ -97,7 +97,7 @@ A **Task** (`TaskRequest`) is a single scheduled execution. Fields:
 | `description` | Human-readable label |
 | `command` | Shell command to run |
 | `run_at` | UTC datetime to execute |
-| `status` | `scheduled` → `running` → `success` / `failed` / `cancelled`; a run missed while offline becomes `missed` |
+| `status` | `scheduled` → `running` → `success` / `failed` / `cancelled`; a run missed while offline becomes `missed`; a delivery awaiting receipt confirmation is `awaiting_ack` |
 | `job_id` | APScheduler job ID (used for cancellation) |
 | `result` | Captured stdout (last 16000 chars retained if longer) |
 | `error` | Captured stderr or failure reason |
@@ -154,11 +154,24 @@ Recurring occurrences that come due while offline follow the same policy rather 
 
 `scheduler_status` also reports a `missed_task_count` as a safety net in case a notification is dropped. Configure the policy and grace window on the Settings page.
 
+### Receipt Acknowledgment
+
+Some deliveries succeed at the transport layer without actually being received. The clearest example is the built-in **`ask_assistant`** action: its HTTP `200` only means the message was *queued to the frontend*, not that a live assistant received or acted on it. A task that fires while the machine is asleep (or the UI is idle) would otherwise be recorded as a silent `success`.
+
+To close that gap, an action or task can set **`require_ack`** (on by default for `ask_assistant`). For such tasks:
+
+1. Delivery moves the task to **`awaiting_ack`** — not `success` — with a one-time token and a deadline (`ack_timeout_seconds`, default 900s).
+2. The delivered message instructs the receiving assistant to confirm receipt by calling **`scheduler_ack_task(task_id, token)`**. A valid ack marks the task `success` and releases any dependents.
+3. If the ack window passes with no confirmation, the task is parked as **`missed`** — so it rides the missed-task flow above and can be re-delivered when someone is actually available (e.g. after the machine wakes). A late ack with a matching token is still accepted.
+4. If delivery can't happen at all (no frontend connected → `503`, or the app is unreachable), the task is parked as `missed` immediately rather than recorded as failed.
+
+This keeps all logic in the plugin — no dependence on the app reporting connection state — and measures the thing that matters: whether an assistant actually received the message.
+
 ---
 
 ## MCP Tools
 
-All 24 tools are available via the `scheduler` MCP server. The naming convention is `scheduler_<action>`.
+All 25 tools are available via the `scheduler` MCP server. The naming convention is `scheduler_<action>`.
 
 ### Orientation
 | Tool | Description |
@@ -182,6 +195,7 @@ All 24 tools are available via the `scheduler` MCP server. The naming convention
 | `scheduler_cancel_task(task_id)` | Cancel a scheduled/running/waiting task |
 | `scheduler_list_missed` | List tasks parked in the `missed` state awaiting a decision |
 | `scheduler_resolve_missed(task_id, action)` | Resolve a missed task — `action` is `"run"` or `"skip"` |
+| `scheduler_ack_task(task_id, token)` | Confirm receipt of an ack-required scheduled message (marks it `success`) |
 | `scheduler_cleanup` | Delete all terminal tasks now |
 
 ### Recurring Tasks
@@ -380,6 +394,7 @@ The FastAPI backend is also directly accessible. Base URL: `http://127.0.0.1:801
 | `POST` | `/api/tasks/{id}/cancel` | Cancel a task |
 | `GET` | `/api/tasks/missed` | List tasks parked in the `missed` state |
 | `POST` | `/api/tasks/{id}/resolve_missed` | Resolve a missed task (JSON body `{"action":"run"\|"skip"}`) |
+| `POST` | `/api/tasks/{id}/ack` | Confirm receipt of an ack-required task (JSON body `{"token":"..."}`) |
 | `GET` | `/api/tasks/{id}/dependencies` | Get dependency graph for a task |
 | `GET` | `/api/tasks/stats` | Count tasks by status |
 | `POST` | `/api/tasks/cleanup` | Manually trigger cleanup |
@@ -470,7 +485,7 @@ mage_scheduler_plugin/
 ├── mcp_server/
 │   ├── __main__.py              ← Entry point: start backend → serve MCP stdio
 │   ├── backend.py               ← Backend process management (start, health-check, restart)
-│   └── tools.py                 ← 24 FastMCP tool definitions (httpx → REST API)
+│   └── tools.py                 ← 25 FastMCP tool definitions (httpx → REST API)
 │
 └── tests/
     ├── conftest.py              ← Pytest fixtures (in-memory DB, mocked scheduler)

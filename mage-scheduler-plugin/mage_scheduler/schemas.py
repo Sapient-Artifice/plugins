@@ -43,6 +43,7 @@ class ActionCreate(BaseModel):
     max_retries: int = 0
     retry_delay: int = 60
     retain_result: bool = False
+    require_ack: bool = False
 
 
 class ActionRead(BaseModel):
@@ -58,6 +59,7 @@ class ActionRead(BaseModel):
     max_retries: int = 0
     retry_delay: int = 60
     retain_result: bool = False
+    require_ack: bool = False
 
     class Config:
         from_attributes = True
@@ -74,6 +76,7 @@ class ActionUpdate(BaseModel):
     max_retries: int = 0
     retry_delay: int = 60
     retain_result: bool = False
+    require_ack: bool = False
 
 
 class TaskIntent(BaseModel):
@@ -209,6 +212,10 @@ class MissedResolution(BaseModel):
     action: str  # "run" | "skip"
 
 
+class AckRequest(BaseModel):
+    token: str
+
+
 class TaskRead(BaseModel):
     id: int
     created_at: datetime
@@ -230,6 +237,7 @@ class TaskRead(BaseModel):
     recurring_task_id: int | None = None
     depends_on: list[int] | None = None
     retain_result: bool = False
+    require_ack: bool = False
 
     class Config:
         from_attributes = True

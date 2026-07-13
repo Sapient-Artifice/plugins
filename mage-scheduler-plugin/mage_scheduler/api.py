@@ -28,6 +28,7 @@ from schemas import (
     RecurringTaskCreate,
     RecurringTaskRead,
     RecurringTaskUpdate,
+    AckRequest,
     MissedResolution,
     TaskCreate,
     TaskDependencyRead,
@@ -642,17 +643,48 @@ def cancel_task(task_id: int, db: Session = Depends(get_db)):
     task = db.get(TaskRequest, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.status not in ("scheduled", "running", "waiting"):
+    if task.status not in ("scheduled", "running", "waiting", "awaiting_ack"):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot cancel task with status '{task.status}'",
         )
     cancel_command(task.job_id, terminate=True)
     task.status = "cancelled"
+    task.ack_token = None
     db.commit()
     _cascade_fail_dependents(db, task_id, f"Dependency task {task_id} failed or was cancelled.")
     db.commit()
     return {"status": "cancelled", "task_id": task_id}
+
+
+@app.post("/api/tasks/{task_id}/ack")
+def ack_task(task_id: int, payload: AckRequest, db: Session = Depends(get_db)):
+    """Confirm receipt of a delivered require_ack task, marking it success.
+
+    Accepts an ack for a task still awaiting confirmation, or for one already
+    parked as 'missed' after timing out (a late but valid ack), as long as the
+    one-time token matches.
+    """
+    task = db.get(TaskRequest, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status not in ("awaiting_ack", "missed"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task {task_id} is not awaiting acknowledgment (status='{task.status}').",
+        )
+    if not task.ack_token or payload.token != task.ack_token:
+        raise HTTPException(status_code=403, detail="Invalid or expired ack token.")
+
+    task.status = "success"
+    task.ack_token = None
+    task.ack_deadline = None
+    db.commit()
+
+    # Now that it has genuinely succeeded, release any dependents.
+    from jobs.run_command import _trigger_dependents
+    _trigger_dependents(task_id, "success")
+    return {"status": "success", "task_id": task_id}
 
 
 @app.get("/api/tasks/missed", response_model=list[TaskRead])
@@ -905,6 +937,7 @@ def settings_update(
     task_retention_days: int | None = Form(None),
     missed_task_policy: str | None = Form(None),
     missed_grace_seconds: int | None = Form(None),
+    ack_timeout_seconds: int | None = Form(None),
 ):
     allowed_command_dirs_list = _parse_allowed_dirs(allowed_command_dirs)
     allowed_cwd_dirs_list = _parse_allowed_dirs(allowed_cwd_dirs)
@@ -943,6 +976,8 @@ def settings_update(
             settings.missed_task_policy = missed_task_policy
         if missed_grace_seconds is not None:
             settings.missed_grace_seconds = max(0, missed_grace_seconds)
+        if ack_timeout_seconds is not None:
+            settings.ack_timeout_seconds = max(1, ack_timeout_seconds)
         session.commit()
     return RedirectResponse(url="/settings", status_code=303)
 
@@ -1147,6 +1182,7 @@ def create_action(payload: ActionCreate, db: Session = Depends(get_db)):
         max_retries=max(0, payload.max_retries),
         retry_delay=max(1, payload.retry_delay),
         retain_result=1 if payload.retain_result else 0,
+        require_ack=1 if payload.require_ack else 0,
     )
     db.add(action)
     db.commit()
@@ -1180,6 +1216,7 @@ def update_action(action_id: int, payload: ActionUpdate, db: Session = Depends(g
     action.max_retries = max(0, payload.max_retries)
     action.retry_delay = max(1, payload.retry_delay)
     action.retain_result = 1 if payload.retain_result else 0
+    action.require_ack = 1 if payload.require_ack else 0
     db.commit()
     db.refresh(action)
     return action

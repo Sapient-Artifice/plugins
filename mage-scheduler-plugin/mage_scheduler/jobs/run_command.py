@@ -10,10 +10,26 @@ import json
 import os
 import subprocess
 import urllib.request
+import uuid
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
+
 from db import SessionLocal, init_db
-from models import TaskDependency, TaskRequest
+from models import Settings, TaskDependency, TaskRequest
+
+# ask_assistant.py exit codes (kept in sync with scripts/ask_assistant.py)
+EXIT_OK = 0
+EXIT_CONFIG_ERROR = 1
+EXIT_UNDELIVERABLE = 3
+DEFAULT_ACK_TIMEOUT_SECONDS = 900
+
+
+def _ack_timeout_seconds(session) -> int:
+    settings = session.execute(select(Settings)).scalars().first()
+    if settings is None or settings.ack_timeout_seconds is None:
+        return DEFAULT_ACK_TIMEOUT_SECONDS
+    return max(1, settings.ack_timeout_seconds)
 
 ASK_ASSISTANT_ENDPOINT = os.getenv("MAGE_ASK_ASSISTANT_URL", "http://127.0.0.1:11115/ask_assistant")
 NOTIFICATION_OUTPUT_MAX = 500
@@ -83,6 +99,26 @@ def run_command(task_request_id: int, command: str) -> dict:
         notify = bool(task_request.notify_on_complete)
         action_name = task_request.action_name or "custom_command"
         description = task_request.description or ""
+
+        # Receipt-acknowledgment gate: generate a one-time token now so it can
+        # be injected into the subprocess env, and remember how long to wait.
+        # The flag is the task's own require_ack OR its action's default, so
+        # ask_assistant tasks are gated no matter how they were created.
+        require_ack = bool(task_request.require_ack)
+        if not require_ack and task_request.action_name:
+            from models import Action
+            action = session.execute(
+                select(Action).where(Action.name == task_request.action_name)
+            ).scalar_one_or_none()
+            if action is not None and action.require_ack:
+                require_ack = True
+                task_request.require_ack = 1  # persist the effective flag
+        ack_token = None
+        ack_timeout = DEFAULT_ACK_TIMEOUT_SECONDS
+        if require_ack:
+            ack_token = uuid.uuid4().hex
+            task_request.ack_token = ack_token
+            ack_timeout = _ack_timeout_seconds(session)
         session.commit()
 
     triggered_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -98,6 +134,9 @@ def run_command(task_request_id: int, command: str) -> dict:
     env["SCHEDULER_TRIGGERED_AT"] = triggered_at
     env["SCHEDULER_ACTION_NAME"] = action_name
     env["SCHEDULER_DESCRIPTION"] = description
+    if require_ack and ack_token:
+        env["SCHEDULER_ACK_REQUIRED"] = "1"
+        env["SCHEDULER_ACK_TOKEN"] = ack_token
 
     # shell=True is intentional: users author these commands themselves and
     # expect shell features (pipes, redirects, &&, etc.) to work as written.
@@ -123,6 +162,31 @@ def run_command(task_request_id: int, command: str) -> dict:
 
         task_request.result = _truncate_output(result.stdout.strip() if result.stdout else None)
         task_request.error = _truncate_output(result.stderr.strip() if result.stderr else None)
+
+        # --- Receipt-acknowledgment handling -------------------------------
+        # A delivered ask_assistant message (HTTP 200) only means "queued to the
+        # frontend", not "received". Don't call it success: wait for an ack.
+        if require_ack:
+            if result.returncode == EXIT_OK:
+                task_request.status = "awaiting_ack"
+                task_request.ack_deadline = datetime.now(timezone.utc).replace(
+                    tzinfo=None
+                ) + timedelta(seconds=ack_timeout)
+                session.commit()
+                return {"awaiting_ack": True, "task_id": task_request_id}
+            if result.returncode == EXIT_UNDELIVERABLE:
+                # Nobody was available to receive it — park as missed so it can
+                # be re-delivered later rather than recorded as failed/success.
+                task_request.status = "missed"
+                task_request.ack_token = None
+                task_request.error = _truncate_output(
+                    "Not delivered: no assistant was available to receive the "
+                    "message. Parked as missed for re-delivery."
+                )
+                session.commit()
+                return {"missed": "undeliverable", "task_id": task_request_id}
+            # Any other non-zero exit is a real error → fall through to
+            # the standard retry / failed handling below.
 
         if result.returncode != 0 and retry_count < max_retries:
             task_request.retry_count = retry_count + 1

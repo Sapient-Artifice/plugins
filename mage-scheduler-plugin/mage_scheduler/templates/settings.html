@@ -71,6 +71,15 @@
                 <span class="muted">seconds (default: 300) &mdash; a run overdue by less than this is treated as on-time and simply runs.</span>
             </div>
         </div>
+        <div class="field">
+            <label for="ack_timeout_seconds">Receipt Ack Timeout (seconds)</label>
+            <div style="display:flex;align-items:center;gap:10px">
+                <input type="number" name="ack_timeout_seconds" id="ack_timeout_seconds"
+                       value="{{ settings.ack_timeout_seconds if settings.ack_timeout_seconds is not none else 900 }}"
+                       min="1" max="86400" style="width:90px">
+                <span class="muted">seconds (default: 900) &mdash; how long an ack-required task (e.g. ask_assistant) waits for a live assistant to confirm receipt before it is parked as missed.</span>
+            </div>
+        </div>
     </fieldset>
 
     <div class="form-actions">
