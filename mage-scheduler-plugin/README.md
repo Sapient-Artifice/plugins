@@ -194,7 +194,7 @@ A Jinja2-rendered web UI at `http://127.0.0.1:8012` for managing tasks, actions,
 - **Auto-refresh** every 10 s (paused while you're mid-edit) so state stays live; served with `Cache-Control: no-store`.
 - Create one-off or recurring tasks from a form, browse history, and edit settings.
 
-**Opens in your system browser by default.** When embedded as an in-app panel, Mage Lab's HTML-tab sandbox can make the dashboard read-only (its buttons and forms won't reach the backend), so `scheduler_open_dashboard` launches it in the real browser, where it's fully interactive. Set `SCHEDULER_DASHBOARD_IN_APP=1` to force the in-app tab instead.
+**Runs as an in-app Mage Lab tab by default.** That tab is a cross-origin sandbox — native form navigation works, but `fetch`/XHR to the backend and native `confirm()` / `alert()` modals are blocked. The dashboard is built to that constraint: buttons submit via plain form navigation (no XHR), and destructive actions (Skip, Delete) use a **two-click "click again to confirm"** instead of a modal. Set `SCHEDULER_DASHBOARD_IN_BROWSER=1` to open it in your system browser instead.
 
 ---
 
@@ -403,7 +403,7 @@ Set in `.claude-plugin/plugin.json` under `mcpServers.env`, or export before sta
 | `SCHEDULER_PORT` | `8012` | Port the FastAPI backend listens on |
 | `SCHEDULER_HOST` | `127.0.0.1` | Bind address for the FastAPI backend |
 | `SCHEDULER_TIMEZONE` | system local tz | Default timezone for scheduling (IANA name, e.g. `America/New_York`). Auto-detected on macOS/Linux (from `TZ` or `/etc/localtime`); set explicitly on Windows. |
-| `SCHEDULER_DASHBOARD_IN_APP` | `0` | Open the dashboard as an in-app Mage Lab tab instead of the system browser. Off by default — the in-app tab is currently read-only under the app's HTML sandbox (see [Dashboard](#dashboard)). |
+| `SCHEDULER_DASHBOARD_IN_BROWSER` | `0` | Open the dashboard in the system browser instead of the default in-app Mage Lab tab (see [Dashboard](#dashboard)). |
 | `MAGE_ASK_ASSISTANT_URL` | `http://127.0.0.1:11115/ask_assistant` | Endpoint the scheduler posts assistant notifications and ack-required messages to. |
 
 The backend log is written to `$SCHEDULER_DATA_DIR/scheduler.log`. If the backend fails to start, check there first.

@@ -1,9 +1,8 @@
-"""The dashboard must open in the system browser by default.
+"""The dashboard opens as an in-app Mage Lab tab by default.
 
-The mage-lab in-app HTML tab is sandboxed without allow-same-origin (app commit
-f88d4462), which makes the dashboard a null origin and blocks its fetch/forms/
-buttons. So _open_in_app must default to the real browser, and must NOT attempt
-the sandboxed in-app tab unless explicitly opted in.
+Mage Lab's in-app HTML tab is a cross-origin sandbox where native form POST
+works (the dashboard is built to that constraint), so the dashboard defaults to
+the in-app tab. SCHEDULER_DASHBOARD_IN_BROWSER=1 forces the system browser.
 """
 from __future__ import annotations
 
@@ -17,21 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 tools = pytest.importorskip("mcp_server.tools")
 
 
-def test_defaults_to_browser(monkeypatch):
-    monkeypatch.delenv("SCHEDULER_DASHBOARD_IN_APP", raising=False)
-    browser, posts = [], []
-    monkeypatch.setattr(tools, "open_browser", lambda url: browser.append(url))
-    monkeypatch.setattr(tools.httpx, "post", lambda *a, **k: posts.append(1))
-
-    tools._open_in_app("http://127.0.0.1:8012/", "dashboard")
-
-    assert browser == ["http://127.0.0.1:8012/"]
-    assert posts == []  # never touches the sandboxed in-app open_file path
-
-
-@pytest.mark.parametrize("val", ["1", "true", "YES"])
-def test_in_app_opt_in_uses_app_tab(monkeypatch, val):
-    monkeypatch.setenv("SCHEDULER_DASHBOARD_IN_APP", val)
+def test_defaults_to_in_app(monkeypatch):
+    monkeypatch.delenv("SCHEDULER_DASHBOARD_IN_BROWSER", raising=False)
     posts = []
 
     class _Resp:
@@ -42,9 +28,22 @@ def test_in_app_opt_in_uses_app_tab(monkeypatch, val):
     monkeypatch.setattr(tools.httpx, "post", lambda *a, **k: posts.append(1) or _Resp())
     monkeypatch.setattr(
         tools, "open_browser",
-        lambda url: pytest.fail("must not fall back to browser when opted in"),
+        lambda url: pytest.fail("default must be the in-app tab, not the browser"),
     )
 
     tools._open_in_app("http://127.0.0.1:8012/", "dashboard")
 
-    assert posts == [1]  # opted in → attempted the in-app open_file tab
+    assert posts == [1]  # attempted the in-app open_file tab
+
+
+@pytest.mark.parametrize("val", ["1", "true", "YES"])
+def test_in_browser_opt_in(monkeypatch, val):
+    monkeypatch.setenv("SCHEDULER_DASHBOARD_IN_BROWSER", val)
+    browser, posts = [], []
+    monkeypatch.setattr(tools, "open_browser", lambda url: browser.append(url))
+    monkeypatch.setattr(tools.httpx, "post", lambda *a, **k: posts.append(1))
+
+    tools._open_in_app("http://127.0.0.1:8012/", "dashboard")
+
+    assert browser == ["http://127.0.0.1:8012/"]
+    assert posts == []  # forced browser → never touches the in-app path

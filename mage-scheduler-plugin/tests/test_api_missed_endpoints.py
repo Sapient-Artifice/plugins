@@ -244,3 +244,16 @@ class TestDashboardButtonFeedback:
         assert "setInterval" in html and "10000" in html
         assert "_touched" not in html
         assert "10&nbsp;seconds" in html
+
+    def test_sandbox_safe_confirm(self, api_client):
+        client, Factory = api_client
+        s = Factory()
+        make_task(s, status="missed")
+        s.commit()
+        s.close()
+        html = client.get("/").text
+        # Native confirm() modals are blocked in the in-app cross-origin sandbox,
+        # so destructive buttons use a two-click data-confirm handled globally.
+        assert 'onclick="return confirm' not in html
+        assert "data-confirm=" in html
+        assert "button[data-confirm]" in html

@@ -84,19 +84,19 @@ _PLUGIN_DIR = Path(__file__).resolve().parent.parent
 
 
 def _open_in_app(url: str, panel: str = "panel") -> None:
-    """Open the dashboard — in the system browser by default, or an in-app tab.
+    """Open the dashboard as an in-app Mage Lab tab (default), or the browser.
 
-    As of mage-lab commit f88d4462 ("Render HTML tabs through sandboxed
-    previews"), in-app HTML tabs render inside a sandbox WITHOUT
-    ``allow-same-origin``, which makes this dashboard a null origin — its
-    fetch, forms, and buttons are all blocked, so it becomes read-only. Until
-    the app offers a trusted-panel path for localhost control surfaces, open in
-    the real browser, where the dashboard is fully interactive.
+    Mage Lab renders in-app HTML tabs in a cross-origin sandbox (no
+    ``allow-same-origin``): native form POST works, but ``fetch``/XHR to the
+    backend and ``confirm()``/``alert()`` modals are blocked. The dashboard is
+    built to that constraint (form-navigation buttons; a two-click confirm
+    instead of a modal), so it is fully usable in-app.
 
-    Set ``SCHEDULER_DASHBOARD_IN_APP=1`` to force the (currently non-interactive)
-    in-app tab instead.
+    Set ``SCHEDULER_DASHBOARD_IN_BROWSER=1`` to open in the system browser
+    instead (e.g. if you prefer a standalone window). Either way, the in-app
+    path falls back to the browser automatically if the app is unreachable.
     """
-    if os.environ.get("SCHEDULER_DASHBOARD_IN_APP", "").strip().lower() not in (
+    if os.environ.get("SCHEDULER_DASHBOARD_IN_BROWSER", "").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -104,7 +104,7 @@ def _open_in_app(url: str, panel: str = "panel") -> None:
         open_browser(url)
         return
 
-    # --- in-app tab path (opt-in) ------------------------------------------
+    # --- in-app tab path (default) -----------------------------------------
     # Write the wrapper to a directory that is both user-writable and on the
     # mage-lab open_file allowlist. The plugin install dir fails both on packaged
     # installer builds: it may be read-only (app bundle / Program Files), and it

@@ -162,6 +162,7 @@
         .btn-primary:hover { background: var(--accent-dark); border-color: var(--accent-dark); color: #fff; }
         .btn-danger { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
         .btn-danger:hover { background: #fecaca; }
+        .confirming { background: #fbbf24 !important; color: #78350f !important; border-color: #f59e0b !important; }
 
         /* Forms */
         fieldset {
@@ -289,6 +290,35 @@
 <div class="page-wrap">
     {% block content %}{% endblock %}
 </div>
+<script>
+// Sandbox-safe confirmation. Native confirm()/alert()/prompt() are blocked in
+// the cross-origin iframe used for Mage Lab's in-app tabs, so a modal "are you
+// sure?" silently cancels the action (the button appears to do nothing). Any
+// button carrying a data-confirm attribute instead uses a two-click "click
+// again to confirm" — works both in-app and in a real browser. First click
+// arms and relabels the button; a second click within a few seconds submits
+// normally; otherwise it reverts.
+(function () {
+    "use strict";
+    document.addEventListener("click", function (e) {
+        var btn = e.target && e.target.closest ? e.target.closest("button[data-confirm]") : null;
+        if (!btn) return;
+        if (btn.dataset.armed) return;                 // already armed → let the submit happen
+        e.preventDefault();
+        e.stopPropagation();
+        btn.dataset.armed = "1";
+        btn.dataset.label = btn.textContent;
+        btn.textContent = btn.getAttribute("data-confirm") || "Click again to confirm";
+        btn.classList.add("confirming");
+        window.setTimeout(function () {
+            if (!btn.dataset.armed) return;
+            delete btn.dataset.armed;
+            btn.textContent = btn.dataset.label || btn.textContent;
+            btn.classList.remove("confirming");
+        }, 3500);
+    }, true);
+})();
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -39,7 +39,7 @@
                     <button type="submit" class="{{ 'btn-danger' if rt.enabled else 'btn-primary' }}" style="margin-right:4px">{{ "Disable" if rt.enabled else "Enable" }}</button>
                 </form>
                 <form action="/recurring/{{ rt.id }}/delete" method="post" style="display:inline;margin:0">
-                    <button type="submit" class="btn-danger" onclick="return confirm('Delete recurring task {{ rt.name }}?');">Delete</button>
+                    <button type="submit" class="btn-danger" data-confirm="Confirm delete?">Delete</button>
                 </form>
             </td>
         </tr>

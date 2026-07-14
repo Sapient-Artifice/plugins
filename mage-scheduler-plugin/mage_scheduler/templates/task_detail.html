@@ -62,7 +62,7 @@
 <div class="form-actions">
     <a href="/" class="btn">Back to Dashboard</a>
     <form action="/tasks/{{ task.id }}/delete" method="post" style="margin:0">
-        <button type="submit" class="btn-danger" onclick="return confirm('Delete task {{ task.id }}?');">Delete Task</button>
+        <button type="submit" class="btn-danger" data-confirm="Confirm delete?">Delete Task</button>
     </form>
 </div>
 {% endblock %}

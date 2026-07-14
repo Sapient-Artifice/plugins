@@ -37,7 +37,7 @@
             <td style="white-space:nowrap">
                 <a href="/actions/{{ action.id }}/edit" class="btn" style="margin-right:4px">Edit</a>
                 <form action="/actions/{{ action.id }}/delete" method="post" style="display:inline;margin:0">
-                    <button type="submit" class="btn-danger" onclick="return confirm('Delete action {{ action.name }}?');">Delete</button>
+                    <button type="submit" class="btn-danger" data-confirm="Confirm delete?">Delete</button>
                 </form>
             </td>
         </tr>

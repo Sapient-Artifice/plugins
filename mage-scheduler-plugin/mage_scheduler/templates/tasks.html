@@ -390,7 +390,7 @@
                     <button type="submit" class="btn-primary">Run now</button>
                 </form>
                 <form action="/tasks/{{ task.id }}/skip_missed" method="post" style="display:inline;margin:0">
-                    <button type="submit" class="btn-danger" onclick="return confirm('Skip task {{ task.id }}? Any tasks depending on it will be cancelled.');">Skip</button>
+                    <button type="submit" class="btn-danger" data-confirm="Confirm skip?" title="Skipping also cancels any tasks that depend on it">Skip</button>
                 </form>
             </td>
         </tr>
@@ -485,7 +485,7 @@
             <td class="muted">{{ task.created_at | local_time }}</td>
             <td>
                 <form action="/tasks/{{ task.id }}/delete" method="post" style="margin:0">
-                    <button type="submit" class="btn-danger" onclick="return confirm('Delete task {{ task.id }}?');">Delete</button>
+                    <button type="submit" class="btn-danger" data-confirm="Confirm delete?">Delete</button>
                 </form>
             </td>
         </tr>
