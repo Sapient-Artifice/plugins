@@ -84,13 +84,27 @@ _PLUGIN_DIR = Path(__file__).resolve().parent.parent
 
 
 def _open_in_app(url: str, panel: str = "panel") -> None:
-    """Open a URL in the mage-lab in-app tab via a local iframe wrapper.
+    """Open the dashboard — in the system browser by default, or an in-app tab.
 
-    Writes a small HTML file containing a full-screen <iframe src="url"> so
-    that the live app loads directly — preserving its own assets, navigation,
-    and AJAX calls — then asks the mage-lab backend to open that file as a tab.
-    Falls back to the system browser if the backend is unreachable.
+    As of mage-lab commit f88d4462 ("Render HTML tabs through sandboxed
+    previews"), in-app HTML tabs render inside a sandbox WITHOUT
+    ``allow-same-origin``, which makes this dashboard a null origin — its
+    fetch, forms, and buttons are all blocked, so it becomes read-only. Until
+    the app offers a trusted-panel path for localhost control surfaces, open in
+    the real browser, where the dashboard is fully interactive.
+
+    Set ``SCHEDULER_DASHBOARD_IN_APP=1`` to force the (currently non-interactive)
+    in-app tab instead.
     """
+    if os.environ.get("SCHEDULER_DASHBOARD_IN_APP", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        open_browser(url)
+        return
+
+    # --- in-app tab path (opt-in) ------------------------------------------
     # Write the wrapper to a directory that is both user-writable and on the
     # mage-lab open_file allowlist. The plugin install dir fails both on packaged
     # installer builds: it may be read-only (app bundle / Program Files), and it
