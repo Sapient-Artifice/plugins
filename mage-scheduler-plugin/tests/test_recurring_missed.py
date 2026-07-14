@@ -145,3 +145,62 @@ class TestRecurringCatchUp:
         assert task.status == "cancelled"
         assert calls == []
         s2.close()
+
+
+class TestSupersede:
+    def test_new_occurrence_supersedes_prior_unresolved(self, rec_mem_db, monkeypatch):
+        """A newer occurrence collapses an earlier still-parked one (no stacking)."""
+        from jobs.recurring_check import check_recurring_tasks
+        from models import TaskRequest
+
+        _mock_dispatch(monkeypatch)
+        s = rec_mem_db()
+        rt = make_recurring(s, command="echo weekly")
+        # An earlier occurrence still parked awaiting a decision.
+        prior = TaskRequest(
+            description="last week", command="echo weekly",
+            run_at=_now() - timedelta(days=7), status="missed",
+            recurring_task_id=rt.id,
+        )
+        s.add(prior)
+        rt.next_run_at = _now() - timedelta(seconds=30)  # new one due, on time
+        s.commit()
+        prior_id = prior.id
+        s.close()
+
+        check_recurring_tasks()
+
+        s2 = rec_mem_db()
+        assert s2.get(TaskRequest, prior_id).status == "cancelled"
+        assert "Superseded" in (s2.get(TaskRequest, prior_id).error or "")
+        # Exactly one live (scheduled) occurrence remains.
+        live = s2.execute(
+            select(TaskRequest).where(TaskRequest.status == "scheduled")
+        ).scalars().all()
+        assert len(live) == 1
+        s2.close()
+
+    def test_awaiting_ack_prior_is_superseded(self, rec_mem_db, monkeypatch):
+        from jobs.recurring_check import check_recurring_tasks
+        from models import TaskRequest
+
+        _mock_dispatch(monkeypatch)
+        s = rec_mem_db()
+        rt = make_recurring(s, command="echo weekly")
+        prior = TaskRequest(
+            description="in flight", command="echo weekly",
+            run_at=_now() - timedelta(days=7), status="awaiting_ack",
+            recurring_task_id=rt.id, ack_token="tok",
+        )
+        s.add(prior)
+        rt.next_run_at = _now() - timedelta(seconds=30)
+        s.commit()
+        prior_id = prior.id
+        s.close()
+
+        check_recurring_tasks()
+
+        s2 = rec_mem_db()
+        superseded = s2.get(TaskRequest, prior_id)
+        assert superseded.status == "cancelled" and superseded.ack_token is None
+        s2.close()

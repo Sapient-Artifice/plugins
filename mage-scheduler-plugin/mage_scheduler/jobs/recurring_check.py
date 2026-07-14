@@ -91,6 +91,27 @@ def _resolve_command(session, rt: RecurringTask) -> str:
     return command
 
 
+def _supersede_prior_occurrences(session, recurring_task_id: int) -> int:
+    """Collapse still-unresolved prior occurrences of the same recurring task.
+
+    When a newer occurrence is created, any earlier occurrence still parked
+    ('missed') or in-flight ('awaiting_ack') is stale — cancel it so a recurring
+    task that keeps missing can't stack up N pending re-deliveries/nudges.
+    Returns the number superseded.
+    """
+    stale = session.execute(
+        select(TaskRequest).where(
+            TaskRequest.recurring_task_id == recurring_task_id,
+            TaskRequest.status.in_(("missed", "awaiting_ack")),
+        )
+    ).scalars().all()
+    for t in stale:
+        t.status = "cancelled"
+        t.ack_token = None
+        t.error = "Superseded by a newer scheduled occurrence of this recurring task."
+    return len(stale)
+
+
 def _spawn_task(session, rt: RecurringTask, now_utc: datetime) -> None:
     """Create a TaskRequest from a RecurringTask and schedule it immediately."""
     command = _resolve_command(session, rt)
@@ -100,6 +121,7 @@ def _spawn_task(session, rt: RecurringTask, now_utc: datetime) -> None:
         rt.next_run_at = _compute_next_run(rt.cron, rt.timezone, now_utc)
         return
 
+    _supersede_prior_occurrences(session, rt.id)
     task_request = TaskRequest(
         description=rt.description or rt.name,
         command=command,
@@ -146,6 +168,7 @@ def _spawn_missed_occurrence(
         rt.next_run_at = _compute_next_run(rt.cron, rt.timezone, now_utc)
         return None
 
+    _supersede_prior_occurrences(session, rt.id)
     intended = rt.next_run_at or now_utc
     task_request = TaskRequest(
         description=rt.description or rt.name,
@@ -177,8 +200,11 @@ def _spawn_missed_occurrence(
             "scheduler was offline."
         )
         bucket = "auto_skip"
-    else:  # always_ask
-        bucket = "missed"
+    else:  # always_ask — park only; reconcile's policy pass owns the re-nudge
+        task_request.last_notified_at = None
+        rt.last_run_at = now_utc
+        rt.next_run_at = _compute_next_run(rt.cron, rt.timezone, now_utc)
+        return None
 
     brief = _brief(task_request)
     rt.last_run_at = now_utc

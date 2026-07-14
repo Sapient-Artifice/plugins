@@ -468,6 +468,13 @@ def _dashboard_context(request: Request, db: Session, error: str | None = None, 
         .order_by(TaskRequest.created_at.desc())
         .limit(10)
     ).scalars().all()
+    # Tasks parked 'missed' awaiting a run/skip decision — the durable surface
+    # that survives a notification nobody was around to see.
+    needs_decision_tasks = db.execute(
+        select(TaskRequest)
+        .where(TaskRequest.status == "missed")
+        .order_by(TaskRequest.run_at.asc())
+    ).scalars().all()
     recurring_tasks = db.execute(
         select(RecurringTask).order_by(RecurringTask.name.asc())
     ).scalars().all()
@@ -479,6 +486,7 @@ def _dashboard_context(request: Request, db: Session, error: str | None = None, 
         "recent_results": recent_results,
         "blocked_tasks": blocked_tasks,
         "waiting_tasks": waiting_tasks,
+        "needs_decision_tasks": needs_decision_tasks,
         "recurring_tasks": recurring_tasks,
         "cleanup_enabled": bool(settings.cleanup_enabled),
         "retention_days": settings.task_retention_days or 30,
@@ -489,7 +497,11 @@ def _dashboard_context(request: Request, db: Session, error: str | None = None, 
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)):
-    return templates.TemplateResponse("tasks.html", _dashboard_context(request, db))
+    resp = templates.TemplateResponse("tasks.html", _dashboard_context(request, db))
+    # The dashboard is live state — never let the webview serve a stale copy
+    # (that's how a redeploy can look like "no changes" after an app restart).
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.post("/tasks")
@@ -722,6 +734,26 @@ def resolve_missed_task(
         db.commit()
         return {"status": "cancelled", "task_id": task_id}
     raise HTTPException(status_code=400, detail="action must be 'run' or 'skip'")
+
+
+@app.post("/tasks/{task_id}/run_missed")
+def run_missed_form(task_id: int, db: Session = Depends(get_db)):
+    """Dashboard 'Run now' button for a parked task → re-dispatch, then reload."""
+    task = db.get(TaskRequest, task_id)
+    if task is not None and task.status == "missed":
+        run_missed_task(db, task)
+        db.commit()
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/tasks/{task_id}/skip_missed")
+def skip_missed_form(task_id: int, db: Session = Depends(get_db)):
+    """Dashboard 'Skip' button for a parked task → cancel, then reload."""
+    task = db.get(TaskRequest, task_id)
+    if task is not None and task.status == "missed":
+        skip_missed_task(db, task, "Skipped by user from the dashboard.")
+        db.commit()
+    return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/api/parse")

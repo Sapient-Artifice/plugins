@@ -238,11 +238,12 @@ class TestExpireAwaitingAck:
         db_session.add(t)
         db_session.commit()
 
-        summary = {"missed": []}
-        _expire_awaiting_ack(db_session, now, summary)
+        _expire_awaiting_ack(db_session, now)
 
+        # Parks as missed and resets the throttle so the policy pass acts now.
         assert t.status == "missed"
-        assert len(summary["missed"]) == 1
+        assert t.ack_token is None
+        assert t.last_notified_at is None
 
     def test_before_deadline_unchanged(self, db_session):
         from jobs.reconcile import _expire_awaiting_ack
@@ -257,11 +258,9 @@ class TestExpireAwaitingAck:
         db_session.add(t)
         db_session.commit()
 
-        summary = {"missed": []}
-        _expire_awaiting_ack(db_session, now, summary)
+        _expire_awaiting_ack(db_session, now)
 
         assert t.status == "awaiting_ack"
-        assert summary["missed"] == []
 
 
 # ---------------------------------------------------------------------------
