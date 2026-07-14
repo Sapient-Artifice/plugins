@@ -1,8 +1,8 @@
 # Mage Scheduler Plugin
 
-A task scheduler plugin for [Mage Lab](https://github.com/mage-lab/mage-lab). Schedule one-off commands, set up cron-driven recurring tasks, chain tasks with dependency graphs, and get completion notifications — all without any external services.
+A task scheduler plugin for [Mage Lab](https://magelab.ai). Schedule one-off commands, set up cron-driven recurring tasks, chain tasks with dependency graphs, and get completion notifications — all without any external services.
 
-Drop the directory into `~/Mage/Skills/mage-scheduler/` and it works.
+Drop the directory into `~/Mage/Skills/` and it works.
 
 ---
 
@@ -15,7 +15,8 @@ Drop the directory into `~/Mage/Skills/mage-scheduler/` and it works.
 - **Actions** — reusable, vetted command templates. Register once, schedule many times. Restrict allowed env keys and working directories per action.
 - **Retries** — configurable `max_retries` and `retry_delay` per task or action.
 - **Completion notifications** — opt-in per task; posts a structured result back to the assistant when the task finishes.
-- **Missed-task recovery** — tasks whose scheduled time passed while the backend was offline are rehydrated or surfaced for a run/skip decision instead of being silently lost. Configurable global policy.
+- **Missed-task recovery** — a run missed while the backend was offline (or an ack-required message nobody received) is surfaced *loudly* — on the assistant **and** a native OS notification — and *durably*, re-nudging or re-delivering per a configurable policy until you handle it. Never silently lost.
+- **Receipt acknowledgment** — ack-required deliveries (e.g. `ask_assistant`) count as done only once a live assistant confirms receipt; otherwise they park as missed for re-delivery.
 - **Auto-cleanup** — configurable retention policy deletes old terminal tasks automatically.
 - **Web dashboard** — Jinja2-rendered HTML UI at `http://127.0.0.1:8012` for task/action/settings management.
 - **25 MCP tools** — full scheduling, inspection, and management surface exposed to the LLM via MCP stdio.
@@ -27,10 +28,10 @@ Drop the directory into `~/Mage/Skills/mage-scheduler/` and it works.
 ## Installation
 
 ```bash
-cp -r mage-scheduler-plugin ~/Mage/Skills/mage-scheduler
+cp -r mage-scheduler-plugin ~/Mage/Skills/
 ```
 
-That's it. The plugin activates automatically the next time mage lab starts (or when you reload plugins). The backend server starts on first use and persists between sessions — scheduled tasks continue firing even when mage lab is closed.
+Then activate it from **Settings → Skills & Plugins**. The plugin activates the next time Mage Lab starts (or when you reload plugins). The backend server starts on first use and persists between sessions — scheduled tasks continue firing even when mage lab is closed.
 
 ### Requirements
 
@@ -66,7 +67,7 @@ Mage Lab
 
 **Task execution:** Each task is stored as a `TaskRequest` row with `status = "scheduled"`. APScheduler fires `run_command(task_id, command)` at the scheduled time. The job reads the row, runs the command as a subprocess, writes stdout/stderr back to the row, and updates the status to `success` or `failed`.
 
-**Durability & missed tasks:** APScheduler's job store is in-memory, so one-off `date` jobs do not survive a backend restart. The `SQLite` `TaskRequest` rows are the durable record; `beat_reconcile` (run once at startup and every 60s thereafter) reconciles them against the live scheduler. On startup it **rehydrates** the jobs for tasks still due in the future, so a plain restart never drops them. A task whose `run_at` passed while the backend was offline (overdue by more than the configurable grace window) is a **missed** task: depending on the global `missed_task_policy` it is parked in the `missed` status for a run/skip decision (`always_ask`, the default), re-dispatched (`auto_run`), or cancelled (`auto_skip`). Recurring occurrences that come due while offline follow the same policy instead of firing late. When tasks are missed, the scheduler posts a summary notification to the assistant. See [Missed Tasks](#missed-tasks).
+**Durability & missed tasks:** APScheduler's job store is in-memory, so one-off `date` jobs do not survive a backend restart. The `SQLite` `TaskRequest` rows are the durable record; `beat_reconcile` (run once at startup and every 60s thereafter) reconciles them against the live scheduler. On startup it **rehydrates** the jobs for tasks still due in the future, so a plain restart never drops them. A task whose `run_at` passed while the backend was offline (overdue by more than the configurable grace window) is a **missed** task: depending on the global `missed_task_policy` it is parked in the `missed` status for a run/skip decision (`always_ask`, the default), re-dispatched (`auto_run`), or cancelled (`auto_skip`). Recurring occurrences that come due while offline follow the same policy instead of firing late. When tasks are missed, the scheduler alerts you on both the assistant and a native OS notification, and keeps nudging (or re-delivering) until they're resolved. See [Missed Tasks](#missed-tasks).
 
 ---
 
@@ -134,25 +135,28 @@ The dependency beat job (`check_waiting_tasks`) re-evaluates all waiting tasks e
 
 ### Missed Tasks
 
-A task's scheduled run can be missed if the backend is offline (machine asleep, app closed, crash) when its `run_at` arrives. The reconcile beat (`reconcile_scheduled_tasks`) detects these and surfaces them instead of losing them silently.
+A scheduled run can be missed two ways: the backend was **offline** (machine asleep, app closed, crash) when its `run_at` arrived, or the task was **delivered but never received** — an ack-required message (see [Receipt Acknowledgment](#receipt-acknowledgment)) whose confirmation window closed because nobody was there. Either way the run is surfaced *loudly and durably* instead of being silently lost.
 
-**What counts as missed:** a `scheduled` task with no live scheduler job, overdue by more than `missed_grace_seconds` (default 300s). A shorter delay is treated as effectively on-time and simply runs (covering the 60s beat latency and brief sleeps).
+**What counts as missed:** a `scheduled` task with no live scheduler job, overdue by more than `missed_grace_seconds` (default 300s) — a shorter delay is treated as effectively on-time and simply runs (covering the 60s beat latency and brief sleeps) — or an ack-required task whose confirmation window closed.
 
-**What happens** is governed by the global `missed_task_policy` setting:
+**Two notification channels.** When a task is missed, the scheduler alerts you on **both** the assistant (via `ask_assistant`) **and** a native OS notification (macOS / Linux / Windows) — so a run that misses at 5 a.m. isn't lost just because the assistant channel happened to be down.
 
-- `always_ask` (default) — the task is parked in the `missed` status and waits for a human decision.
-- `auto_run` — the task is re-dispatched to run immediately.
-- `auto_skip` — the task is cancelled and its dependents cascade-fail.
+**What happens** is governed by the global `missed_task_policy` setting, and it is applied *continuously* (every 60s beat), not just once — so a parked task keeps knocking until it's handled:
 
-Recurring occurrences that come due while offline follow the same policy rather than firing late. Whenever tasks are missed, the scheduler posts a single summary notification to the assistant (via `ask_assistant`).
+- `always_ask` (default) — the task is parked in the `missed` status and **re-nudges** you on a throttle (~30 min) until you run or skip it.
+- `auto_run` — the task is re-dispatched. A deterministic command runs immediately; an **interactive** (ack-required) task **re-delivers on a backoff (~15 min) until an assistant actually acknowledges it**, so it never records a false `success`.
+- `auto_skip` — the task is cancelled and its dependents cascade-fail; the notification names the dependent tasks it also cancelled.
 
-**Resolving a parked (`missed`) task:**
+Recurring occurrences that come due while offline follow the same policy rather than firing late. A newer occurrence of a recurring task **supersedes** any still-unresolved earlier one, so a job that keeps missing can't stack up.
 
+**Resolving a parked (`missed`) task** — from the dashboard, the assistant, or the API:
+
+- **Dashboard** — the **"Needs Your Decision"** block lists every parked task with **Run now** / **Skip** buttons.
 - `scheduler_list_missed` — list everything awaiting a decision.
 - `scheduler_resolve_missed(task_id, "run")` — run it now (preserves the task ID and any dependents).
 - `scheduler_resolve_missed(task_id, "skip")` — cancel it and free the queue.
 
-`scheduler_status` also reports a `missed_task_count` as a safety net in case a notification is dropped. Configure the policy and grace window on the Settings page.
+`scheduler_status` also reports a `missed_task_count` as a safety net in case a notification is dropped. Configure the policy, grace window, and ack timeout under [Settings](#settings).
 
 ### Receipt Acknowledgment
 
@@ -166,6 +170,31 @@ To close that gap, an action or task can set **`require_ack`** (on by default fo
 4. If delivery can't happen at all (no frontend connected → `503`, or the app is unreachable), the task is parked as `missed` immediately rather than recorded as failed.
 
 This keeps all logic in the plugin — no dependence on the app reporting connection state — and measures the thing that matters: whether an assistant actually received the message.
+
+### Settings
+
+Global settings live in the `settings` table and are editable from the dashboard **Settings** page or via `GET` / `PUT` `/api/settings`:
+
+| Setting | Default | Description |
+|---|---|---|
+| `missed_task_policy` | `always_ask` | How a missed run is handled — `always_ask`, `auto_run`, or `auto_skip` (see [Missed Tasks](#missed-tasks)). |
+| `missed_grace_seconds` | `300` | A run overdue by less than this is treated as on-time and simply runs; beyond it, the missed-task policy applies. |
+| `ack_timeout_seconds` | `900` | How long an ack-required task waits in `awaiting_ack` for a receipt confirmation before it is parked as `missed`. |
+| `cleanup_enabled` | `false` | Whether the daily cleanup beat auto-deletes old terminal tasks. |
+| `task_retention_days` | `30` | Age after which terminal tasks become eligible for cleanup (when enabled). |
+| allowed command / cwd dirs | (unset) | Optional allow-lists restricting where scheduled commands and working directories may live. |
+
+---
+
+## Dashboard
+
+A Jinja2-rendered web UI at `http://127.0.0.1:8012` for managing tasks, actions, recurring schedules, and settings. Highlights:
+
+- **"Needs Your Decision"** block — parked (`missed`) tasks with one-click **Run now** / **Skip**.
+- **Auto-refresh** every 10 s (paused while you're mid-edit) so state stays live; served with `Cache-Control: no-store`.
+- Create one-off or recurring tasks from a form, browse history, and edit settings.
+
+**Opens in your system browser by default.** When embedded as an in-app panel, Mage Lab's HTML-tab sandbox can make the dashboard read-only (its buttons and forms won't reach the backend), so `scheduler_open_dashboard` launches it in the real browser, where it's fully interactive. Set `SCHEDULER_DASHBOARD_IN_APP=1` to force the in-app tab instead.
 
 ---
 
@@ -373,7 +402,9 @@ Set in `.claude-plugin/plugin.json` under `mcpServers.env`, or export before sta
 | `SCHEDULER_DATA_DIR` | `~/.mage_scheduler` | Directory for the SQLite database and log file |
 | `SCHEDULER_PORT` | `8012` | Port the FastAPI backend listens on |
 | `SCHEDULER_HOST` | `127.0.0.1` | Bind address for the FastAPI backend |
-| `SCHEDULER_TIMEZONE` | system local tz | Default timezone for scheduling (IANA name, e.g. `America/New_York`). Auto-detected on macOS/Linux; set explicitly on Windows. |
+| `SCHEDULER_TIMEZONE` | system local tz | Default timezone for scheduling (IANA name, e.g. `America/New_York`). Auto-detected on macOS/Linux (from `TZ` or `/etc/localtime`); set explicitly on Windows. |
+| `SCHEDULER_DASHBOARD_IN_APP` | `0` | Open the dashboard as an in-app Mage Lab tab instead of the system browser. Off by default — the in-app tab is currently read-only under the app's HTML sandbox (see [Dashboard](#dashboard)). |
+| `MAGE_ASK_ASSISTANT_URL` | `http://127.0.0.1:11115/ask_assistant` | Endpoint the scheduler posts assistant notifications and ack-required messages to. |
 
 The backend log is written to `$SCHEDULER_DATA_DIR/scheduler.log`. If the backend fails to start, check there first.
 
@@ -474,6 +505,7 @@ mage_scheduler_plugin/
 │   ├── models.py                ← ORM models
 │   ├── schemas.py               ← Pydantic request/response schemas
 │   ├── nl_parser.py             ← Natural language → ParsedRequest
+│   ├── notify.py                ← Assistant + OS-notification delivery (missed-task alerts)
 │   ├── jobs/
 │   │   ├── run_command.py       ← Task executor + dependency helpers + notify
 │   │   ├── dependency_check.py  ← Beat job: unblock waiting tasks
@@ -487,27 +519,10 @@ mage_scheduler_plugin/
 │   ├── backend.py               ← Backend process management (start, health-check, restart)
 │   └── tools.py                 ← 25 FastMCP tool definitions (httpx → REST API)
 │
-└── tests/
+└── tests/                       ← 32 files, 543 tests — in-memory SQLite, no backend needed
     ├── conftest.py              ← Pytest fixtures (in-memory DB, mocked scheduler)
-    ├── test_api_action_endpoints.py      ← GET/POST/PUT/DELETE /api/actions
-    ├── test_api_create_task_form.py      ← POST /tasks (HTML form; error → dashboard, success → redirect)
-    ├── test_api_depends_on.py            ← depends_on validation in intent API
-    ├── test_api_recurring_endpoints.py   ← /api/recurring CRUD and toggle
-    ├── test_api_settings_endpoints.py    ← GET/POST /settings; dashboard cleanup pill
-    ├── test_api_task_endpoints.py        ← /api/tasks CRUD, cancel, dependencies, health
-    ├── test_backend_restart.py           ← mcp_server/backend.py: _is_ready, _find_backend_pid, restart_backend
-    ├── test_beat_task.py                 ← APScheduler beat job wiring
-    ├── test_cleanup.py                   ← cleanup beat job logic
-    ├── test_dependency_runtime.py        ← dependency resolution at runtime
-    ├── test_intent_api_core.py           ← /api/tasks/intent core scheduling paths
-    ├── test_intent_api_recurring.py      ← /api/tasks/intent cron/recurring paths
-    ├── test_intent_replace_existing.py   ← replace_existing cancellation logic
-    ├── test_intent_utilities.py          ← intent helpers and edge cases
-    ├── test_nl_parser.py                 ← natural language → ParsedRequest
-    ├── test_recurring_beat_task.py       ← recurring beat job spawning logic
-    ├── test_run_command.py               ← task executor: success, failure, retries, notify
-    └── test_validate_depends_on.py       ← depends_on schema validation
-    — 412 tests total
+    └── test_*.py                ← API + intent, recurring, dependencies, reconcile/missed,
+                                    ack, notify, timezone, cleanup, cross-platform, dashboard
 ```
 
 ---
@@ -521,7 +536,7 @@ cd mage_scheduler_plugin
 uv run pytest tests/ -v
 ```
 
-All 412 tests run in approximately 3 seconds against an in-memory SQLite database. No backend needs to be running.
+All 543 tests run in a few seconds against an in-memory SQLite database. No backend needs to be running.
 
 ### Test Architecture
 

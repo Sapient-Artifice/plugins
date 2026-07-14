@@ -1,6 +1,6 @@
 # Mage Plugins
 
-A collection of plugins for [Mage Lab](https://github.com/bardware/mage-lab) — drop any plugin folder into `~/Mage/Skills/` and activate it from **Settings → Skills & Plugins**.
+A collection of plugins for [Mage Lab](https://magelab.ai) — drop any plugin folder into `~/Mage/Skills/` and activate it from **Settings → Skills & Plugins**.
 
 Skills in Mage combine LLM instructions with tools, letting you activate and deactivate capabilities in a way that keeps the model's context focused and lean. Plugins extend this further. On top of everything a skill offers, a plugin adds dependency handling so required packages and resources are managed automatically, slash command support for user-invocable shortcuts, bash command support for direct shell execution, and lifecycle hooks that let the plugin respond to events like session start, tool use, and session end. Sub-agent support is on the way. Plugins are the right choice when a capability needs to reach outside the conversation — managing its own environment, triggering on events, or giving users direct control through commands.
 
@@ -10,7 +10,7 @@ Skills in Mage combine LLM instructions with tools, letting you activate and dea
 
 | Plugin | Description |
 |---|---|
-| `mage-scheduler-plugin` | allows LLM / user scheduled tasks, including recurrence and dependencies |
+| [`mage-scheduler-plugin`](./mage-scheduler-plugin/) | Schedule one-off, recurring (cron), and dependency-chained tasks for the LLM or user — with missed-task recovery, receipt acknowledgment, retries, and a web dashboard. Runs entirely in-process; no external services. See its [README](./mage-scheduler-plugin/README.md). |
 | *(more coming soon)* | |
 
 ---
@@ -48,6 +48,8 @@ my-plugin/
 
 Only `plugin.json` is required — include only what your plugin needs.
 
+Mage Lab supports [Claude Code plugins](https://docs.anthropic.com/en/docs/claude-code) with near-full compatibility — see [`plugin-compatibility.md`](./plugin-compatibility.md) for the details and caveats.
+
 ### plugin.json
 
 ```json
@@ -57,4 +59,4 @@ Only `plugin.json` is required — include only what your plugin needs.
 }
 ```
 
-See the [Mage Lab docs](https://github.com/bardware/mage-lab) for the full plugin specification.
+See the [Mage Lab Skills & Plugins docs](https://magelab.ai/docs/skills-plugins) for the full plugin specification.
