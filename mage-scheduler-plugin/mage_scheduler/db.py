@@ -108,6 +108,7 @@ def _migrate_schema() -> None:
         _add_column_if_missing(connection, "task_requests", columns, "require_ack", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(connection, "task_requests", columns, "ack_token", "TEXT")
         _add_column_if_missing(connection, "task_requests", columns, "ack_deadline", "DATETIME")
+        _add_column_if_missing(connection, "task_requests", columns, "last_notified_at", "DATETIME")
 
         action_columns = {
             row[1] for row in connection.exec_driver_sql("PRAGMA table_info(actions)").fetchall()

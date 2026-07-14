@@ -304,27 +304,30 @@ class TestNotification:
     def test_no_notification_when_nothing_actionable(self, monkeypatch):
         import jobs.reconcile as rec
 
-        calls = []
-        monkeypatch.setattr(rec.urllib.request, "urlopen", lambda *a, **k: calls.append(1))
+        posts, os_calls = [], []
+        monkeypatch.setattr(rec, "post_to_assistant", lambda m: posts.append(m) or True)
+        monkeypatch.setattr(rec, "os_notify", lambda t, b: os_calls.append((t, b)))
         rec._notify(
             {"rehydrated": [{"id": 1}], "caught_up": [], "missed": [],
              "auto_run": [], "auto_skip": []},
             "always_ask",
         )
-        assert calls == []
+        assert posts == [] and os_calls == []
 
     def test_notification_sent_for_missed(self, monkeypatch):
         import jobs.reconcile as rec
 
-        calls = []
-        monkeypatch.setattr(rec.urllib.request, "urlopen", lambda *a, **k: calls.append(1))
+        posts, os_calls = [], []
+        monkeypatch.setattr(rec, "post_to_assistant", lambda m: posts.append(m) or True)
+        monkeypatch.setattr(rec, "os_notify", lambda t, b: os_calls.append((t, b)))
         rec._notify(
             {"rehydrated": [], "caught_up": [],
              "missed": [{"id": 7, "description": "d", "run_at": "t", "action_name": None}],
              "auto_run": [], "auto_skip": []},
             "always_ask",
         )
-        assert calls == [1]
+        # Both channels fire: assistant (primary) AND OS backstop.
+        assert len(posts) == 1 and len(os_calls) == 1
 
     def test_build_notification_mentions_tasks_and_policy(self):
         from jobs.reconcile import _build_notification
@@ -338,3 +341,111 @@ class TestNotification:
         assert "always_ask" in msg
         assert "Task 7" in msg
         assert "scheduler_resolve_missed" in msg
+
+
+# ---------------------------------------------------------------------------
+# Ongoing policy handling of already-parked ('missed') tasks
+# ---------------------------------------------------------------------------
+
+def _park_missed(session, *, interactive=False, last_notified_at=None):
+    """Create a task already parked in 'missed' (as after an ack timeout)."""
+    from models import TaskRequest
+
+    t = TaskRequest(
+        description="parked", command="echo hi",
+        run_at=_now() - timedelta(hours=1), status="missed",
+        action_name="ask_assistant" if interactive else None,
+        require_ack=1 if interactive else 0,
+        last_notified_at=last_notified_at,
+    )
+    session.add(t)
+    session.flush()
+    return t
+
+
+class TestMissedPolicyOngoing:
+    def test_auto_run_redelivers_interactive_parked_task(self, rec_db):
+        from jobs.reconcile import reconcile_scheduled_tasks
+        from models import TaskRequest
+
+        Factory, dispatched = rec_db
+        _set_policy(Factory, "auto_run")
+        s = Factory()
+        tid = _park_missed(s, interactive=True).id
+        s.commit(); s.close()
+
+        summary = reconcile_scheduled_tasks(startup=False)
+
+        # Re-dispatched (kept knocking) and reported under auto_run.
+        assert [d[0] for d in dispatched] == [tid]
+        assert [b["id"] for b in summary["auto_run"]] == [tid]
+        s2 = Factory()
+        t = s2.get(TaskRequest, tid)
+        assert t.status == "scheduled" and t.last_notified_at is not None
+        s2.close()
+
+    def test_auto_run_respects_redeliver_backoff(self, rec_db):
+        from jobs.reconcile import reconcile_scheduled_tasks
+
+        Factory, dispatched = rec_db
+        _set_policy(Factory, "auto_run")
+        s = Factory()
+        # Re-delivered 5 min ago — inside the 15 min backoff → must wait.
+        _park_missed(s, interactive=True, last_notified_at=_now() - timedelta(minutes=5))
+        s.commit(); s.close()
+
+        summary = reconcile_scheduled_tasks(startup=False)
+
+        assert dispatched == []
+        assert summary["auto_run"] == []
+
+    def test_always_ask_renudges_when_stale(self, rec_db):
+        from jobs.reconcile import reconcile_scheduled_tasks
+
+        Factory, _ = rec_db
+        _set_policy(Factory, "always_ask")
+        s = Factory()
+        tid = _park_missed(s, last_notified_at=_now() - timedelta(minutes=40)).id
+        s.commit(); s.close()
+
+        summary = reconcile_scheduled_tasks(startup=False)
+
+        # 40 min > 30 min throttle → re-nudged.
+        assert [b["id"] for b in summary["missed"]] == [tid]
+
+    def test_always_ask_throttles_recent_nudge(self, rec_db):
+        from jobs.reconcile import reconcile_scheduled_tasks
+
+        Factory, _ = rec_db
+        _set_policy(Factory, "always_ask")
+        s = Factory()
+        _park_missed(s, last_notified_at=_now() - timedelta(minutes=5))
+        s.commit(); s.close()
+
+        summary = reconcile_scheduled_tasks(startup=False)
+
+        # 5 min < 30 min throttle → stays quiet, still parked.
+        assert summary["missed"] == []
+
+    def test_auto_skip_cancels_straggler_and_reports_cascade(self, rec_db):
+        from jobs.reconcile import reconcile_scheduled_tasks
+        from models import TaskDependency, TaskRequest
+
+        Factory, _ = rec_db
+        _set_policy(Factory, "auto_skip")
+        s = Factory()
+        parked = _park_missed(s)
+        dependent = make_task(s, status="waiting")
+        s.add(TaskDependency(task_id=dependent.id, depends_on_task_id=parked.id))
+        s.commit()
+        pid, did = parked.id, dependent.id
+        s.close()
+
+        summary = reconcile_scheduled_tasks(startup=False)
+
+        assert [b["id"] for b in summary["auto_skip"]] == [pid]
+        assert summary["auto_skip"][0]["cascaded"] == 1
+        s2 = Factory()
+        assert s2.get(TaskRequest, pid).status == "cancelled"
+        assert s2.get(TaskRequest, did).status == "failed"
+        s2.close()

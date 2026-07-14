@@ -155,7 +155,7 @@
 <div class="page-header">
     <h1>Dashboard</h1>
     <div class="sub">
-        Auto-refreshes every 30&nbsp;seconds &mdash; times shown in local time.
+        Auto-refreshes every 10&nbsp;seconds &mdash; times shown in local time.
         {% if cleanup_enabled %}<span class="tag" title="Auto-cleanup enabled — {{ retention_days }}-day retention">auto-cleanup {{ retention_days }}d</span>{% endif %}
     </div>
 </div>
@@ -361,6 +361,46 @@
 </table>
 </div>
 
+{% if needs_decision_tasks %}
+<div id="needs-decision-section">
+<h2>⚠️ Needs Your Decision</h2>
+<div class="sub">These runs were missed or couldn't reach you and are parked awaiting a run/skip decision.</div>
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Description</th>
+            <th>Action</th>
+            <th>Was Due</th>
+            <th>Why</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for task in needs_decision_tasks %}
+        <tr>
+            <td><a href="/tasks/{{ task.id }}">{{ task.id }}</a></td>
+            <td>{{ task.description }}</td>
+            <td>{{ task.action_name or "-" }}</td>
+            <td>{{ task.run_at | local_time }}</td>
+            <td class="muted">{{ task.error or "Missed its scheduled run." }}</td>
+            <td style="white-space:nowrap">
+                <form action="/tasks/{{ task.id }}/run_missed" method="post" style="display:inline;margin:0">
+                    <button type="submit" class="btn-primary">Run now</button>
+                </form>
+                <form action="/tasks/{{ task.id }}/skip_missed" method="post" style="display:inline;margin:0">
+                    <button type="submit" class="btn-danger" onclick="return confirm('Skip task {{ task.id }}? Any tasks depending on it will be cancelled.');">Skip</button>
+                </form>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+</div>
+{% endif %}
+
 <h2>Waiting Tasks</h2>
 <div class="table-wrap">
 <table>
@@ -461,6 +501,41 @@
 <script>
 (function () {
 "use strict";
+
+// ── Instant feedback on POST actions (Run / Skip / Delete) ───────────────
+// A POST redirects back to "/"; until that reload lands the click feels like
+// it did nothing. Reflect a working state on the submitted button immediately
+// so the action visibly registers.
+document.querySelectorAll('form[method="post"], form[method="POST"]').forEach(function (f) {
+    f.addEventListener("submit", function (e) {
+        const btn = e.submitter || f.querySelector('button[type="submit"], button:not([type])');
+        if (!btn || btn.disabled) return;
+        // Defer to the next tick so the button's value still posts.
+        window.setTimeout(function () {
+            btn.disabled = true;
+            btn.textContent = "Working…";
+        }, 0);
+    });
+});
+
+// ── Run / Skip feedback (native POST — never intercept) ──────────────────
+// The buttons submit their form the normal way: a top-level POST that the
+// webview allows and that reliably redirects back to a fresh dashboard (same
+// mechanism as the auto-refresh reload, which works here). We must NOT cancel
+// or defer the submission — both XHR and deferred-frame resubmission proved
+// unreliable in the webview (XHR is blocked; animation-frame callbacks are
+// throttled in a backgrounded iframe, so a deferred resubmit may never fire,
+// leaving the click doing nothing). Just paint a best-effort state as we go.
+document.addEventListener("submit", function (e) {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (!/^\/tasks\/\d+\/(run|skip)_missed$/.test(form.getAttribute("action") || "")) return;
+    const row = form.closest("tr");
+    const clicked = e.submitter || form.querySelector("button");
+    if (clicked) clicked.textContent = "Working…";
+    if (row) row.style.opacity = "0.5";
+    // No preventDefault — let the native POST navigate.
+});
 
 // ── Timezone auto-detect ─────────────────────────────────────────────────
 const tzInput = document.getElementById("timezone");
@@ -669,14 +744,25 @@ schedForm.addEventListener("toggle", () => {
     localStorage.setItem("schedule-form-open", schedForm.open);
 });
 
-// ── Auto-refresh guard ───────────────────────────────────────────────────
-let _touched = false;
-document.querySelectorAll("input, select, textarea").forEach(el => {
-    el.addEventListener("input",  () => { _touched = true; });
-    el.addEventListener("focus",  () => { _touched = true; });
-    el.addEventListener("change", () => { _touched = true; });
-});
-setTimeout(() => { if (!_touched) location.reload(); }, 30000);
+// ── Auto-refresh: reload every 10s, but never mid-interaction ────────────
+// Re-evaluated each tick (no permanent latch): pauses only while the user is
+// actually scheduling — a focused field, the date picker open, a dirty create-
+// form, or a Run/Skip action in flight — then resumes on its own once idle.
+const REFRESH_MS = 10000;
+function _refreshBlocked() {
+    if (document.hidden) return true;
+    const el = document.activeElement;
+    if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return true;   // typing
+    if (document.querySelector(".cal-popover.open")) return true;          // date picker open
+    if (document.querySelector("#needs-decision-section button[disabled]")) return true;  // action in flight
+    const ids = ["description", "command", "message", "run_date", "action_id"];
+    for (let i = 0; i < ids.length; i++) {
+        const v = document.getElementById(ids[i]);
+        if (v && v.value && String(v.value).trim()) return true;           // unsaved input
+    }
+    return false;
+}
+setInterval(function () { if (!_refreshBlocked()) location.reload(); }, REFRESH_MS);
 
 })();
 </script>

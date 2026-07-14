@@ -7,11 +7,37 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel
 
 
+def _system_tz_from_localtime() -> str | None:
+    """Resolve the IANA zone name from the /etc/localtime symlink (macOS/Linux).
+
+    This is the robust fallback for when ``TZ`` is unset: in that case
+    ``datetime.now().astimezone()`` yields a bare fixed-offset zone with no IANA
+    ``.key`` (e.g. 'PDT'), and detection would otherwise silently drop to UTC —
+    which is exactly how a restart from a shell without ``TZ`` flips the default
+    to UTC. The system zone lives in the symlink target, e.g.
+    ``/var/db/timezone/zoneinfo/America/Los_Angeles`` (macOS) or
+    ``/usr/share/zoneinfo/America/Los_Angeles`` (Linux).
+    """
+    try:
+        link = os.path.realpath("/etc/localtime")
+        marker = "zoneinfo/"
+        idx = link.rfind(marker)
+        if idx == -1:
+            return None
+        candidate = link[idx + len(marker):]
+        ZoneInfo(candidate)  # validate it names a real zone before trusting it
+        return candidate
+    except Exception:
+        return None
+
+
 def _default_tz() -> str:
     """Return the default scheduling timezone.
 
-    Checks SCHEDULER_TIMEZONE env var first, then auto-detects from the
-    system clock. Falls back to 'UTC' if detection fails.
+    Resolution order: SCHEDULER_TIMEZONE env var → the system clock's IANA key
+    (present when TZ is set) → the /etc/localtime system zone (works with TZ
+    unset) → 'UTC'. The localtime step keeps a restart from a TZ-less
+    environment from silently defaulting everything to UTC.
     """
     env_tz = os.environ.get("SCHEDULER_TIMEZONE", "").strip()
     if env_tz:
@@ -26,6 +52,9 @@ def _default_tz() -> str:
             return local_tz.key
     except Exception:
         pass
+    sys_tz = _system_tz_from_localtime()
+    if sys_tz:
+        return sys_tz
     return "UTC"
 
 

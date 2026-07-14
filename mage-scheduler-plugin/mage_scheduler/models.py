@@ -126,6 +126,11 @@ class TaskRequest(Base):
     require_ack = Column(Integer, default=0, nullable=False)
     ack_token = Column(Text, nullable=True)
     ack_deadline = Column(DateTime, nullable=True)
+    # Last time a "missed / awaiting decision" notification was sent OR the task
+    # was re-delivered, used to throttle the re-nudge (always_ask) and the
+    # re-delivery backoff (auto_run) so a parked task keeps knocking without
+    # spamming. Null means "never" → act immediately.
+    last_notified_at = Column(DateTime, nullable=True)
 
     @property
     def env_keys(self) -> list[str] | None:
