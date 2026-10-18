@@ -44,9 +44,24 @@ mcp = FastMCP("scheduler")
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
+def _auth_headers() -> dict:
+    """Read the control-plane key the backend generated (same user, same host) so the MCP
+    tools authenticate transparently — Mage Lab integration is unchanged by the auth addition."""
+    import pathlib
+    pinned = os.environ.get("SCHEDULER_API_KEY")
+    if pinned:
+        return {"Authorization": f"Bearer {pinned}"}
+    try:
+        base = pathlib.Path(os.environ.get("SCHEDULER_DATA_DIR", pathlib.Path.home() / ".mage_scheduler"))
+        key = (base / "api.key").read_text().strip()
+        return {"Authorization": f"Bearer {key}"} if key else {}
+    except OSError:
+        return {}
+
+
 def _get(path: str) -> str:
     try:
-        resp = httpx.get(f"{BASE_URL}{path}", timeout=10)
+        resp = httpx.get(f"{BASE_URL}{path}", headers=_auth_headers(), timeout=10)
         return resp.text
     except httpx.RequestError as exc:
         return json.dumps({"error": f"connection_error: {exc}"})
@@ -54,7 +69,7 @@ def _get(path: str) -> str:
 
 def _post(path: str, payload: dict) -> str:
     try:
-        resp = httpx.post(f"{BASE_URL}{path}", json=payload, timeout=10)
+        resp = httpx.post(f"{BASE_URL}{path}", json=payload, headers=_auth_headers(), timeout=10)
         return resp.text
     except httpx.RequestError as exc:
         return json.dumps({"error": f"connection_error: {exc}"})
@@ -62,7 +77,7 @@ def _post(path: str, payload: dict) -> str:
 
 def _put(path: str, payload: dict) -> str:
     try:
-        resp = httpx.put(f"{BASE_URL}{path}", json=payload, timeout=10)
+        resp = httpx.put(f"{BASE_URL}{path}", json=payload, headers=_auth_headers(), timeout=10)
         return resp.text
     except httpx.RequestError as exc:
         return json.dumps({"error": f"connection_error: {exc}"})
@@ -70,7 +85,7 @@ def _put(path: str, payload: dict) -> str:
 
 def _delete(path: str) -> str:
     try:
-        resp = httpx.delete(f"{BASE_URL}{path}", timeout=10)
+        resp = httpx.delete(f"{BASE_URL}{path}", headers=_auth_headers(), timeout=10)
         return resp.text
     except httpx.RequestError as exc:
         return json.dumps({"error": f"connection_error: {exc}"})

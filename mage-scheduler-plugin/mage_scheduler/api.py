@@ -48,16 +48,37 @@ from nl_parser import parse_request
 from contextlib import asynccontextmanager
 
 
+import auth as _auth
+from fastapi.responses import JSONResponse
+
+
 @asynccontextmanager
 async def _lifespan(application):
     from scheduler import start_scheduler, stop_scheduler
     init_db()
+    _auth.get_or_create_key()   # materialize + log the control-plane key on first start
+    _auth.anon_enabled()        # emit the loud warning now if dev-anon is set
     start_scheduler()
     yield
     stop_scheduler()
 
 
 app = FastAPI(title="Mage Scheduler", lifespan=_lifespan)
+
+
+@app.middleware("http")
+async def _auth_gate(request: Request, call_next):
+    """Fail-closed control-plane gate (ported from mAgents). Every route is protected
+    except health/login/static; a browser with no credential is redirected to /login,
+    an API client gets 401."""
+    if _auth.request_allowed(request):
+        return await call_next(request)
+    accepts_html = "text/html" in request.headers.get("accept", "")
+    if accepts_html and request.method == "GET":
+        return RedirectResponse("/login", status_code=303)
+    return JSONResponse({"error": "authentication required"}, status_code=401)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"https?://(127\.0\.0\.1|localhost)(:\d+)?",
@@ -493,6 +514,30 @@ def _dashboard_context(request: Request, db: Session, error: str | None = None, 
         "error": error,
         "form": form,
     }
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login(request: Request, key: str = Query(default="")):
+    """Minimal dashboard auth: GET /login?key=<api key> sets an HttpOnly cookie, then the
+    gate lets the browser through. No key → a small form. Single-user, loopback — a server-side
+    session store would be overkill."""
+    import hmac as _hmac
+    if key and _hmac.compare_digest(key, _auth.get_or_create_key()):
+        resp = RedirectResponse("/", status_code=303)
+        resp.set_cookie(_auth.COOKIE_NAME, key, httponly=True, samesite="strict", max_age=30 * 86400)
+        return resp
+    msg = "Invalid key." if key else ""
+    return HTMLResponse(
+        f"<!doctype html><title>Mage Scheduler — Sign in</title>"
+        f"<body style='font-family:system-ui;max-width:28rem;margin:4rem auto'>"
+        f"<h2>Mage Scheduler</h2><p style='color:#b91c1c'>{msg}</p>"
+        f"<form method='get' action='/login'>"
+        f"<p>API key <input type='password' name='key' autofocus style='width:100%;padding:.5rem'></p>"
+        f"<button style='padding:.5rem 1rem'>Sign in</button></form>"
+        f"<p style='color:#6b7280;font-size:.85rem'>Retrieve it on the host: "
+        f"<code>cat ~/.mage_scheduler/api.key</code></p></body>",
+        status_code=401 if key else 200,
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
