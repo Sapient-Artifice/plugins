@@ -308,28 +308,43 @@ def scheduler_context() -> str:
 # Dashboard
 # ---------------------------------------------------------------------------
 
+def _authed_url(path: str) -> str:
+    """Build a dashboard URL that pre-authenticates via /login?key=<key>, so the in-app
+    dashboard button keeps working transparently after the auth upgrade (no visible login
+    wall for the normal same-user flow). Falls back to the bare path if no key is readable."""
+    hdr = _auth_headers()
+    bearer = hdr.get("Authorization", "")
+    key = bearer[7:] if bearer.startswith("Bearer ") else ""
+    if not key:
+        return f"{BASE_URL}{path}"
+    from urllib.parse import quote
+    # /login sets the cookie then 303-redirects to "/"; for non-root targets, land there after.
+    dest = f"{BASE_URL}/login?key={quote(key)}"
+    return dest if path in ("", "/") else f"{dest}&next={quote(path)}"
+
+
 @mcp.tool()
 def scheduler_open_dashboard() -> str:
     """Open the Mage Scheduler task dashboard in the browser."""
-    url = f"{BASE_URL}/"
+    url = _authed_url("/")
     _open_in_app(url, "dashboard")
-    return f"Opened {url}"
+    return f"Opened the scheduler dashboard"
 
 
 @mcp.tool()
 def scheduler_open_actions() -> str:
     """Open the Mage Scheduler actions management page in the browser."""
-    url = f"{BASE_URL}/actions"
+    url = _authed_url("/actions")
     _open_in_app(url, "actions")
-    return f"Opened {url}"
+    return f"Opened the scheduler actions page"
 
 
 @mcp.tool()
 def scheduler_open_settings() -> str:
     """Open the Mage Scheduler settings page in the browser."""
-    url = f"{BASE_URL}/settings"
+    url = _authed_url("/settings")
     _open_in_app(url, "settings")
-    return f"Opened {url}"
+    return f"Opened the scheduler settings page"
 
 
 

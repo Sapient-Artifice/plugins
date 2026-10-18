@@ -1,5 +1,13 @@
 # Mage Scheduler Plugin
 
+> **Upgrading to 3.0.0 — the control plane now requires authentication.** The in-app dashboard and
+> the Mage Lab assistant integration keep working automatically (same-user key read). If you drive
+> the HTTP API directly from your own scripts/cron, add a header:
+> `Authorization: Bearer $(cat ~/.mage_scheduler/api.key)`. Dev/testing only: set
+> `SCHEDULER_ALLOW_ANON=1` to disable the gate (logged loudly). Retrieve the key with
+> `cat ~/.mage_scheduler/api.key`.
+
+
 A task scheduler plugin for [Mage Lab](https://magelab.ai). Schedule one-off commands, set up cron-driven recurring tasks, chain tasks with dependency graphs, and get completion notifications — all without any external services.
 
 Drop the directory into `~/Mage/Skills/` and it works.

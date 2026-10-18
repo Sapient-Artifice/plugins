@@ -1,6 +1,6 @@
 [project]
 name = "mage-scheduler"
-version = "2.0.0"
+version = "3.0.0"
 description = "Task scheduler plugin for Mage Lab — schedule commands, cron tasks, and dependency chains with no external services required."
 readme = "README.md"
 requires-python = ">=3.11"

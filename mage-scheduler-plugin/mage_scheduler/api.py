@@ -517,13 +517,15 @@ def _dashboard_context(request: Request, db: Session, error: str | None = None, 
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login(request: Request, key: str = Query(default="")):
+def login(request: Request, key: str = Query(default=""), next: str = Query(default="/")):
     """Minimal dashboard auth: GET /login?key=<api key> sets an HttpOnly cookie, then the
     gate lets the browser through. No key → a small form. Single-user, loopback — a server-side
     session store would be overkill."""
     import hmac as _hmac
+    # only accept same-site relative redirect targets (no open-redirect)
+    dest = next if next.startswith("/") and not next.startswith("//") else "/"
     if key and _hmac.compare_digest(key, _auth.get_or_create_key()):
-        resp = RedirectResponse("/", status_code=303)
+        resp = RedirectResponse(dest, status_code=303)
         resp.set_cookie(_auth.COOKIE_NAME, key, httponly=True, samesite="strict", max_age=30 * 86400)
         return resp
     msg = "Invalid key." if key else ""
