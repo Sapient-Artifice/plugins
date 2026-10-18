@@ -70,6 +70,13 @@ def _present_token(request) -> str | None:
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
+    # query-param key: the ONLY credential channel that works inside Mage Lab's cross-origin
+    # sandboxed dashboard iframe (SameSite cookies are dropped in that third-party framing; the
+    # base.html shim threads ?key= through every link/form). Equivalent security to the bearer
+    # on a loopback single-user tool; uvicorn runs at log-level warning so it never hits logs.
+    q = request.query_params.get("key")
+    if q:
+        return q
     return request.cookies.get(COOKIE_NAME)
 
 

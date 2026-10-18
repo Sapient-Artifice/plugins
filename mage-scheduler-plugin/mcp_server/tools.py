@@ -309,18 +309,18 @@ def scheduler_context() -> str:
 # ---------------------------------------------------------------------------
 
 def _authed_url(path: str) -> str:
-    """Build a dashboard URL that pre-authenticates via /login?key=<key>, so the in-app
-    dashboard button keeps working transparently after the auth upgrade (no visible login
-    wall for the normal same-user flow). Falls back to the bare path if no key is readable."""
+    """Build a dashboard URL carrying the control-plane key as a query param, so the in-app
+    tab authenticates on load and the base.html shim threads the key through every subsequent
+    link/form. This is the sandbox-compatible channel (SameSite cookies are dropped in the
+    cross-origin iframe). Falls back to the bare path if no key is readable."""
     hdr = _auth_headers()
     bearer = hdr.get("Authorization", "")
     key = bearer[7:] if bearer.startswith("Bearer ") else ""
     if not key:
         return f"{BASE_URL}{path}"
     from urllib.parse import quote
-    # /login sets the cookie then 303-redirects to "/"; for non-root targets, land there after.
-    dest = f"{BASE_URL}/login?key={quote(key)}"
-    return dest if path in ("", "/") else f"{dest}&next={quote(path)}"
+    sep = "&" if "?" in path else "?"
+    return f"{BASE_URL}{path}{sep}key={quote(key)}"
 
 
 @mcp.tool()

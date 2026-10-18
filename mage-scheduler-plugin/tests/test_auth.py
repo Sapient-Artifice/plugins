@@ -70,6 +70,18 @@ def test_wrong_bearer_rejected(client):
     assert c.get("/api/tasks", headers={"Authorization": "Bearer not-the-key"}).status_code == 401
 
 
+def test_query_param_key_grants_access(client):
+    # the sandbox-iframe channel: key rides the URL (GET and form-action query strings)
+    c, key = client
+    assert _admitted(c.get(f"/api/tasks?key={key}"))
+    assert _admitted(c.get("/", headers={"accept": "text/html"}, params={"key": key}))
+
+
+def test_wrong_query_param_key_rejected(client):
+    c, _ = client
+    assert c.get("/api/tasks?key=nope").status_code == 401
+
+
 def test_login_sets_cookie_and_cookie_grants_access(client):
     c, key = client
     r = c.get(f"/login?key={key}", follow_redirects=False)
