@@ -12,6 +12,11 @@ from sqlalchemy.orm import sessionmaker
 # Point all DB writes at a throwaway temp path during tests
 os.environ.setdefault("SCHEDULER_DATA_DIR", "/tmp/mage_scheduler_plugin_test")
 
+# The control-plane auth gate (mage_scheduler/auth.py) fail-closes every route. The broad
+# endpoint suite drives TestClient without credentials, so run it with anon enabled; the
+# dedicated test_auth.py explicitly disables this to exercise the real gate.
+os.environ.setdefault("SCHEDULER_ALLOW_ANON", "1")
+
 
 @pytest.fixture(autouse=True)
 def _block_outbound_http(monkeypatch):

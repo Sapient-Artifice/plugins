@@ -44,9 +44,24 @@ mcp = FastMCP("scheduler")
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
+def _auth_headers() -> dict:
+    """Read the control-plane key the backend generated (same user, same host) so the MCP
+    tools authenticate transparently — Mage Lab integration is unchanged by the auth addition."""
+    import pathlib
+    pinned = os.environ.get("SCHEDULER_API_KEY")
+    if pinned:
+        return {"Authorization": f"Bearer {pinned}"}
+    try:
+        base = pathlib.Path(os.environ.get("SCHEDULER_DATA_DIR", pathlib.Path.home() / ".mage_scheduler"))
+        key = (base / "api.key").read_text().strip()
+        return {"Authorization": f"Bearer {key}"} if key else {}
+    except OSError:
+        return {}
+
+
 def _get(path: str) -> str:
     try:
-        resp = httpx.get(f"{BASE_URL}{path}", timeout=10)
+        resp = httpx.get(f"{BASE_URL}{path}", headers=_auth_headers(), timeout=10)
         return resp.text
     except httpx.RequestError as exc:
         return json.dumps({"error": f"connection_error: {exc}"})
@@ -54,7 +69,7 @@ def _get(path: str) -> str:
 
 def _post(path: str, payload: dict) -> str:
     try:
-        resp = httpx.post(f"{BASE_URL}{path}", json=payload, timeout=10)
+        resp = httpx.post(f"{BASE_URL}{path}", json=payload, headers=_auth_headers(), timeout=10)
         return resp.text
     except httpx.RequestError as exc:
         return json.dumps({"error": f"connection_error: {exc}"})
@@ -62,7 +77,7 @@ def _post(path: str, payload: dict) -> str:
 
 def _put(path: str, payload: dict) -> str:
     try:
-        resp = httpx.put(f"{BASE_URL}{path}", json=payload, timeout=10)
+        resp = httpx.put(f"{BASE_URL}{path}", json=payload, headers=_auth_headers(), timeout=10)
         return resp.text
     except httpx.RequestError as exc:
         return json.dumps({"error": f"connection_error: {exc}"})
@@ -70,7 +85,7 @@ def _put(path: str, payload: dict) -> str:
 
 def _delete(path: str) -> str:
     try:
-        resp = httpx.delete(f"{BASE_URL}{path}", timeout=10)
+        resp = httpx.delete(f"{BASE_URL}{path}", headers=_auth_headers(), timeout=10)
         return resp.text
     except httpx.RequestError as exc:
         return json.dumps({"error": f"connection_error: {exc}"})
@@ -293,28 +308,43 @@ def scheduler_context() -> str:
 # Dashboard
 # ---------------------------------------------------------------------------
 
+def _authed_url(path: str) -> str:
+    """Build a dashboard URL carrying the control-plane key as a query param, so the in-app
+    tab authenticates on load and the base.html shim threads the key through every subsequent
+    link/form. This is the sandbox-compatible channel (SameSite cookies are dropped in the
+    cross-origin iframe). Falls back to the bare path if no key is readable."""
+    hdr = _auth_headers()
+    bearer = hdr.get("Authorization", "")
+    key = bearer[7:] if bearer.startswith("Bearer ") else ""
+    if not key:
+        return f"{BASE_URL}{path}"
+    from urllib.parse import quote
+    sep = "&" if "?" in path else "?"
+    return f"{BASE_URL}{path}{sep}key={quote(key)}"
+
+
 @mcp.tool()
 def scheduler_open_dashboard() -> str:
     """Open the Mage Scheduler task dashboard in the browser."""
-    url = f"{BASE_URL}/"
+    url = _authed_url("/")
     _open_in_app(url, "dashboard")
-    return f"Opened {url}"
+    return f"Opened the scheduler dashboard"
 
 
 @mcp.tool()
 def scheduler_open_actions() -> str:
     """Open the Mage Scheduler actions management page in the browser."""
-    url = f"{BASE_URL}/actions"
+    url = _authed_url("/actions")
     _open_in_app(url, "actions")
-    return f"Opened {url}"
+    return f"Opened the scheduler actions page"
 
 
 @mcp.tool()
 def scheduler_open_settings() -> str:
     """Open the Mage Scheduler settings page in the browser."""
-    url = f"{BASE_URL}/settings"
+    url = _authed_url("/settings")
     _open_in_app(url, "settings")
-    return f"Opened {url}"
+    return f"Opened the scheduler settings page"
 
 
 

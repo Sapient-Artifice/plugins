@@ -319,6 +319,29 @@
     }, true);
 })();
 </script>
+<script>
+// Auth key threading (v3.0.0). Mage Lab's in-app dashboard is a cross-origin sandboxed iframe
+// where SameSite cookies are dropped, so the control-plane key rides the URL instead. When the
+// iframe is opened as /?key=<key>, this propagates that key onto every same-origin link and form
+// action so navigation stays authenticated. Uses only DOM + URL APIs (no fetch/XHR — sandbox-safe).
+// No key in the URL (e.g. a cookie-authenticated real browser) → no-op.
+(function () {
+    "use strict";
+    try {
+        var k = new URLSearchParams(window.location.search).get("key");
+        if (!k) return;
+        var thread = function (el, attr) {
+            var v = el.getAttribute(attr);
+            if (!v || v.charAt(0) !== "/") return;          // same-origin absolute paths only
+            var u = new URL(v, window.location.origin);
+            u.searchParams.set("key", k);
+            el.setAttribute(attr, u.pathname + u.search);
+        };
+        document.querySelectorAll('a[href^="/"]').forEach(function (a) { thread(a, "href"); });
+        document.querySelectorAll('form[action^="/"]').forEach(function (f) { thread(f, "action"); });
+    } catch (e) { /* never let threading break the page */ }
+})();
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
