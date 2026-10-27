@@ -91,6 +91,18 @@ def test_login_sets_cookie_and_cookie_grants_access(client):
     assert _admitted(c.get("/api/tasks"))
 
 
+def test_login_redirect_threads_key_for_sandboxed_iframe(client):
+    # Mage Lab's sandboxed iframe drops the login cookie, so the redirect URL must carry
+    # the key — otherwise the in-app login form bounces straight back to /login forever.
+    c, key = client
+    r = c.get(f"/login?key={key}&next=/actions", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/actions?key={key}"
+    # a next target that already has a query string gets '&', not a second '?'
+    r = c.get(f"/login?key={key}&next=/actions%3Fstatus%3Dactive", follow_redirects=False)
+    assert r.headers["location"] == f"/actions?status=active&key={key}"
+
+
 def test_login_wrong_key_no_cookie(client):
     c, _ = client
     r = c.get("/login?key=wrong", follow_redirects=False)
