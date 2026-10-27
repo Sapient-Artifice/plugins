@@ -522,10 +522,16 @@ def login(request: Request, key: str = Query(default=""), next: str = Query(defa
     gate lets the browser through. No key → a small form. Single-user, loopback — a server-side
     session store would be overkill."""
     import hmac as _hmac
+    from urllib.parse import quote
     # only accept same-site relative redirect targets (no open-redirect)
     dest = next if next.startswith("/") and not next.startswith("//") else "/"
     if key and _hmac.compare_digest(key, _auth.get_or_create_key()):
-        resp = RedirectResponse(dest, status_code=303)
+        # Thread the key into the redirect URL as well as the cookie: Mage Lab's sandboxed
+        # cross-origin iframe drops the cookie, so the URL is the only credential that
+        # survives there — this makes the login form a working recovery path in-app
+        # (the base.html shim then threads the key through every subsequent link/form).
+        sep = "&" if "?" in dest else "?"
+        resp = RedirectResponse(f"{dest}{sep}key={quote(key)}", status_code=303)
         resp.set_cookie(_auth.COOKIE_NAME, key, httponly=True, samesite="strict", max_age=30 * 86400)
         return resp
     msg = "Invalid key." if key else ""
