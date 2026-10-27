@@ -8,7 +8,7 @@ uvicorn process started by __main__.py) using httpx. The backend URL is
 derived from the SCHEDULER_PORT env var (default 8012).
 
 Tool naming: function name becomes the MCP tool name.
-In Claude Code, tools are addressed as mcp__scheduler__<tool_name>.
+In Claude Code, tools are addressed as mcp__mage-scheduler__<tool_name>.
 """
 from __future__ import annotations
 
@@ -91,6 +91,39 @@ def _delete(path: str) -> str:
         return json.dumps({"error": f"connection_error: {exc}"})
 
 
+def _read_api_json(
+    path: str,
+    expected_type: type,
+    section: str,
+    errors: dict[str, str],
+    *,
+    timeout: float = 5,
+) -> dict | list | None:
+    """Read protected orientation data without treating a failure as empty data."""
+    try:
+        response = httpx.get(
+            f"{BASE_URL}{path}", headers=_auth_headers(), timeout=timeout
+        )
+    except httpx.RequestError:
+        errors[section] = "Scheduler API request failed."
+        return None
+    if not response.is_success:
+        # Do not include arbitrary response bodies or credentials in diagnostics.
+        errors[section] = f"Scheduler API returned HTTP {response.status_code}."
+        return None
+    try:
+        data = response.json()
+    except ValueError:
+        errors[section] = "Scheduler API returned invalid JSON."
+        return None
+    if not isinstance(data, expected_type) or (
+        isinstance(data, list) and any(not isinstance(item, dict) for item in data)
+    ):
+        errors[section] = "Scheduler API returned an unexpected response format."
+        return None
+    return data
+
+
 _MAGE_LAB_PORT = int(os.environ.get("MAGE_LAB_PORT", os.environ.get("API_PORT", "11115")))
 _MAGE_LAB_URL = os.environ.get("MAGE_LAB_URL", f"http://127.0.0.1:{_MAGE_LAB_PORT}")
 
@@ -159,7 +192,9 @@ def _open_in_app(url: str, panel: str = "panel") -> None:
 @mcp.tool()
 def scheduler_status() -> str:
     """Check whether the Mage Scheduler API and worker are alive.
-    Returns base_url, api_alive, worker_alive, and ready flag."""
+    Returns base_url, api_alive, worker_alive, and ready flag. Readiness also
+    requires authenticated access to missed tasks. A failed read has a null
+    missed_task_count and a diagnostic in errors, not a zero count."""
     api_ok = False
     worker_ok = False
     try:
@@ -177,22 +212,22 @@ def scheduler_status() -> str:
 
     # Safety net: surface any tasks parked in the 'missed' state so a dropped
     # startup notification never leaves them stranded and invisible.
-    missed_ids: list = []
-    if api_ok:
-        try:
-            resp = httpx.get(f"{BASE_URL}/api/tasks/missed", timeout=3)
-            if resp.is_success:
-                missed_ids = [t.get("id") for t in resp.json()]
-        except Exception:
-            pass
+    errors: dict[str, str] = {}
+    missed_tasks = (
+        _read_api_json("/api/tasks/missed", list, "missed_tasks", errors, timeout=3)
+        if api_ok else None
+    )
+    missed_ids = [task.get("id") for task in missed_tasks] if missed_tasks is not None else None
 
     result = {
         "base_url": BASE_URL,
         "api_alive": api_ok,
         "worker_alive": worker_ok,
-        "ready": api_ok and worker_ok,
-        "missed_task_count": len(missed_ids),
+        "ready": api_ok and worker_ok and missed_ids is not None,
+        "missed_task_count": len(missed_ids) if missed_ids is not None else None,
     }
+    if errors:
+        result["errors"] = errors
     if missed_ids:
         result["missed_task_ids"] = missed_ids
         result["missed_hint"] = (
@@ -208,7 +243,8 @@ def scheduler_context() -> str:
 
     Returns in one call: service status, all available Actions (name +
     allowed_env), recent tasks with status/error, task counts by status, and
-    allowed command/cwd directories.
+    allowed command/cwd directories. A failed section is null with a diagnostic
+    in errors; service.data_ready is false until all sections can be read.
 
     Call this once at the start of a scheduling session instead of calling
     scheduler_status, scheduler_list_actions, scheduler_list_tasks, and
@@ -228,7 +264,12 @@ def scheduler_context() -> str:
         except Exception:
             pass
 
-    service = {"base_url": BASE_URL, "api_ready": api_ok, "worker_ready": worker_ok}
+    service = {
+        "base_url": BASE_URL,
+        "api_ready": api_ok,
+        "worker_ready": worker_ok,
+        "data_ready": False,
+    }
 
     if not api_ok:
         return json.dumps(
@@ -236,72 +277,48 @@ def scheduler_context() -> str:
             indent=2,
         )
 
-    actions: list = []
-    try:
-        resp = httpx.get(f"{BASE_URL}/api/actions", timeout=5)
-        if resp.is_success:
-            actions = [
-                {
-                    "name": a.get("name"),
-                    "description": a.get("description"),
-                    "allowed_env": a.get("allowed_env"),
-                }
-                for a in resp.json()
-            ]
-    except Exception:
-        pass
-
-    stats: dict = {}
-    try:
-        resp = httpx.get(f"{BASE_URL}/api/tasks/stats", timeout=5)
-        if resp.is_success:
-            stats = resp.json()
-    except Exception:
-        pass
-
-    recent_tasks: list = []
-    try:
-        resp = httpx.get(f"{BASE_URL}/api/tasks", timeout=5)
-        if resp.is_success:
-            all_tasks = resp.json()
-            active = [t for t in all_tasks if t.get("status") not in ("cancelled", "blocked")]
-            pool = active if active else all_tasks
-            recent_tasks = [
-                {
-                    "id": t.get("id"),
-                    "description": t.get("description"),
-                    "status": t.get("status"),
-                    "run_at": t.get("run_at"),
-                    "action_name": t.get("action_name"),
-                    "error": ((t.get("error") or "")[:100]) or None,
-                }
-                for t in pool[:10]
-            ]
-    except Exception:
-        pass
-
-    validation: dict = {}
-    try:
-        resp = httpx.get(f"{BASE_URL}/api/validation", timeout=5)
-        if resp.is_success:
-            v = resp.json()
-            validation = {
-                "allowed_command_dirs": v.get("allowed_command_dirs", []),
-                "allowed_cwd_dirs": v.get("allowed_cwd_dirs", []),
-            }
-    except Exception:
-        pass
-
-    return json.dumps(
+    errors: dict[str, str] = {}
+    raw_actions = _read_api_json("/api/actions", list, "actions", errors)
+    actions = None if raw_actions is None else [
         {
-            "service": service,
-            "actions": actions,
-            "stats": stats,
-            "recent_tasks": recent_tasks,
-            "validation": validation,
-        },
-        indent=2,
-    )
+            "name": action.get("name"),
+            "description": action.get("description"),
+            "allowed_env": action.get("allowed_env"),
+        }
+        for action in raw_actions
+    ]
+    stats = _read_api_json("/api/tasks/stats", dict, "stats", errors)
+    all_tasks = _read_api_json("/api/tasks", list, "recent_tasks", errors)
+    recent_tasks = None
+    if all_tasks is not None:
+        active = [task for task in all_tasks if task.get("status") not in ("cancelled", "blocked")]
+        recent_tasks = [
+            {
+                "id": task.get("id"),
+                "description": task.get("description"),
+                "status": task.get("status"),
+                "run_at": task.get("run_at"),
+                "action_name": task.get("action_name"),
+                "error": str(task.get("error") or "")[:100] or None,
+            }
+            for task in (active or all_tasks)[:10]
+        ]
+    raw_validation = _read_api_json("/api/validation", dict, "validation", errors)
+    validation = None if raw_validation is None else {
+        "allowed_command_dirs": raw_validation.get("allowed_command_dirs", []),
+        "allowed_cwd_dirs": raw_validation.get("allowed_cwd_dirs", []),
+    }
+    service["data_ready"] = not errors
+    result = {
+        "service": service,
+        "actions": actions,
+        "stats": stats,
+        "recent_tasks": recent_tasks,
+        "validation": validation,
+    }
+    if errors:
+        result["errors"] = errors
+    return json.dumps(result, indent=2)
 
 
 # ---------------------------------------------------------------------------

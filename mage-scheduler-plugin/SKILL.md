@@ -31,6 +31,8 @@ Call `scheduler_context` first. It returns in one call:
 - Task counts by status
 - Allowed command/cwd directories
 
+If `service.data_ready` is false or `errors` is present, report the failed reads. A null section means it could not be read; do not describe it as an empty scheduler. `scheduler_status` likewise returns a null `missed_task_count` when that count is unavailable.
+
 ## Available MCP Tools
 
 ### Orientation
@@ -38,9 +40,9 @@ Call `scheduler_context` first. It returns in one call:
 - `scheduler_status` — lightweight liveness check
 
 ### Scheduling
-- `scheduler_schedule_intent(intent_json)` — primary scheduling tool (one-off, recurring, chained)
-- `scheduler_preview_intent(intent_json)` — validate and preview timing without creating a task
-- `scheduler_run_now(task_json)` — dispatch a command for immediate execution
+- `scheduler_schedule_intent(intent)` — primary scheduling tool (one-off, recurring, chained)
+- `scheduler_preview_intent(intent)` — validate and preview timing without creating a task
+- `scheduler_run_now(task)` — dispatch a command for immediate execution
 
 ### Task inspection & management
 - `scheduler_list_tasks(limit, status)` — list tasks; filter by status e.g. `"scheduled,running"`
@@ -67,8 +69,8 @@ If the scheduler was offline when a task was due, the run is not lost — it bec
 
 ### Actions management
 - `scheduler_list_actions` — list all actions
-- `scheduler_create_action(action_json)` — register a new action
-- `scheduler_update_action(action_id, action_json)` — update an action
+- `scheduler_create_action(action)` — register a new action
+- `scheduler_update_action(action_id, action)` — update an action
 - `scheduler_delete_action(action_id)` — delete an action
 
 ### Validation & settings
@@ -81,6 +83,8 @@ If the scheduler was offline when a task was due, the run is not lost — it bec
 
 ### Backend management
 - `scheduler_restart_backend` — restart the backend process (use when api_alive is false or backend is unresponsive)
+
+The `intent`, `task`, and `action` arguments above are JSON objects, not encoded JSON strings. For example, a preview call uses `{"intent": {"intent_version": "v1", "task": {"command": "/usr/bin/true", "run_in": "5 minutes"}}}`.
 
 ## Intent Schema (v1)
 
