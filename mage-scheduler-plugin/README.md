@@ -208,7 +208,7 @@ A Jinja2-rendered web UI at `http://127.0.0.1:8012` for managing tasks, actions,
 
 ## MCP Tools
 
-All 25 tools are available via the `scheduler` MCP server. The naming convention is `scheduler_<action>`.
+All 25 tools are available via the `mage-scheduler` MCP server. The naming convention is `scheduler_<action>`.
 
 ### Orientation
 | Tool | Description |
@@ -216,12 +216,16 @@ All 25 tools are available via the `scheduler` MCP server. The naming convention
 | `scheduler_context` | Bootstrap call: service status, all actions, recent tasks, counts, validation rules |
 | `scheduler_status` | Lightweight liveness check |
 
+Orientation reads authenticate using the same control-plane key as the other tools. `scheduler_context` returns `service.data_ready: false`, a per-section `errors` map, and `null` for any section that cannot be read. `scheduler_status` returns `ready: false` and a null `missed_task_count` when that read fails. Failed reads are not empty inventories or zero missed tasks.
+
+The `intent`, `task`, and `action` parameters are JSON objects. For example, preview arguments are `{"intent": {"intent_version": "v1", "task": {"command": "/usr/bin/true", "run_in": "5 minutes"}}}`.
+
 ### Scheduling
 | Tool | Description |
 |---|---|
-| `scheduler_schedule_intent(intent_json)` | Primary scheduling tool — one-off, recurring, and chained tasks |
-| `scheduler_preview_intent(intent_json)` | Validate and preview timing without creating anything |
-| `scheduler_run_now(task_json)` | Dispatch a command for immediate execution |
+| `scheduler_schedule_intent(intent)` | Primary scheduling tool — one-off, recurring, and chained tasks |
+| `scheduler_preview_intent(intent)` | Validate and preview timing without creating anything |
+| `scheduler_run_now(task)` | Dispatch a command for immediate execution |
 
 ### Task Inspection & Management
 | Tool | Description |
@@ -246,8 +250,8 @@ All 25 tools are available via the `scheduler` MCP server. The naming convention
 | Tool | Description |
 |---|---|
 | `scheduler_list_actions` | List all registered actions |
-| `scheduler_create_action(action_json)` | Register a new action |
-| `scheduler_update_action(action_id, action_json)` | Update an action |
+| `scheduler_create_action(action)` | Register a new action |
+| `scheduler_update_action(action_id, action)` | Update an action |
 | `scheduler_delete_action(action_id)` | Delete an action |
 
 ### Validation & Dashboard
