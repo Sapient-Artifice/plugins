@@ -296,6 +296,7 @@
 </details>
 
 <h2>Recent Results</h2>
+{% if hidden_count %}<p class="muted">{% if show_hidden %}Showing {{ hidden_count }} older successful recurring runs that are normally hidden. <a href="/">Hide them</a>{% else %}{{ hidden_count }} older successful runs hidden (recurring tasks keep only their newest few). <a href="/?show_hidden=1">Show</a>{% endif %}</p>{% endif %}
 <div class="table-wrap">
 <table>
     <thead>
