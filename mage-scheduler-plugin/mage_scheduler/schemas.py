@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 def _system_tz_from_localtime() -> str | None:
@@ -175,6 +175,7 @@ class RecurringTaskCreate(BaseModel):
     max_retries: int = 0
     retry_delay: int = 60
     enabled: bool = True
+    keep_visible: int | None = Field(default=None, ge=1)
 
 
 class RecurringTaskUpdate(BaseModel):
@@ -190,6 +191,8 @@ class RecurringTaskUpdate(BaseModel):
     max_retries: int = 0
     retry_delay: int = 60
     enabled: bool = True
+    # Omitted = unchanged (a caller that predates the field must not switch it off).
+    keep_visible: int | None = Field(default=None, ge=1)
 
 
 class RecurringTaskRead(BaseModel):
@@ -206,6 +209,7 @@ class RecurringTaskRead(BaseModel):
     max_retries: int = 0
     retry_delay: int = 60
     enabled: bool = True
+    keep_visible: int | None = None
     next_run_at: datetime | None = None
     last_run_at: datetime | None = None
     created_at: datetime

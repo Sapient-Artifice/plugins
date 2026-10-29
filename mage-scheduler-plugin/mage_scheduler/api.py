@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from starlette.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from croniter import croniter
@@ -466,13 +466,38 @@ def _validate_action_payload(
     return resolved_command
 
 
-def _dashboard_context(request: Request, db: Session, error: str | None = None, form: dict | None = None) -> dict:
+def _hidden_task_ids():
+    """Runs hidden by their recurring task's keep_visible: successes older
+    than that task's newest N successes. Nothing else is ever hidden."""
+    ranked = (
+        select(
+            TaskRequest.id.label("id"),
+            RecurringTask.keep_visible.label("keep"),
+            func.row_number().over(
+                partition_by=TaskRequest.recurring_task_id,
+                order_by=(TaskRequest.created_at.desc(), TaskRequest.id.desc()),
+            ).label("rn"),
+        )
+        .join(RecurringTask, RecurringTask.id == TaskRequest.recurring_task_id)
+        .where(TaskRequest.status == "success", RecurringTask.keep_visible.is_not(None))
+        .subquery()
+    )
+    return select(ranked.c.id).where(ranked.c.rn > ranked.c.keep)
+
+
+def _visible(q, include_hidden: bool = False):
+    return q if include_hidden else q.where(TaskRequest.id.not_in(_hidden_task_ids()))
+
+
+def _dashboard_context(request: Request, db: Session, error: str | None = None, form: dict | None = None,
+                       show_hidden: bool = False) -> dict:
     tasks = db.execute(
-        select(TaskRequest).order_by(TaskRequest.created_at.desc()).limit(100)
+        _visible(select(TaskRequest), show_hidden).order_by(TaskRequest.created_at.desc()).limit(100)
     ).scalars().all()
+    hidden_count = db.execute(select(func.count()).select_from(_hidden_task_ids().subquery())).scalar() or 0
     actions = db.execute(select(Action).order_by(Action.name.asc())).scalars().all()
     recent_results = db.execute(
-        select(TaskRequest)
+        _visible(select(TaskRequest), show_hidden)
         .where(TaskRequest.status.in_(["success", "failed"]))
         .order_by(TaskRequest.created_at.desc())
         .limit(5)
@@ -511,6 +536,8 @@ def _dashboard_context(request: Request, db: Session, error: str | None = None, 
         "recurring_tasks": recurring_tasks,
         "cleanup_enabled": bool(settings.cleanup_enabled),
         "retention_days": settings.task_retention_days or 30,
+        "hidden_count": hidden_count,
+        "show_hidden": show_hidden,
         "error": error,
         "form": form,
     }
@@ -549,8 +576,8 @@ def login(request: Request, key: str = Query(default=""), next: str = Query(defa
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, db: Session = Depends(get_db)):
-    resp = templates.TemplateResponse("tasks.html", _dashboard_context(request, db))
+def dashboard(request: Request, show_hidden: bool = Query(default=False), db: Session = Depends(get_db)):
+    resp = templates.TemplateResponse("tasks.html", _dashboard_context(request, db, show_hidden=show_hidden))
     # The dashboard is live state — never let the webview serve a stale copy
     # (that's how a redeploy can look like "no changes" after an app restart).
     resp.headers["Cache-Control"] = "no-store"
@@ -833,9 +860,10 @@ def parse_nl_request(payload: dict):
 @app.get("/api/tasks", response_model=list[TaskRead])
 def list_tasks(
     status: str | None = Query(default=None, description="Comma-separated status filter, e.g. 'scheduled,running'"),
+    include_hidden: bool = Query(default=False, description="Also list runs hidden by a recurring task's keep_visible"),
     db: Session = Depends(get_db),
 ):
-    q = select(TaskRequest).order_by(TaskRequest.created_at.desc())
+    q = _visible(select(TaskRequest), include_hidden).order_by(TaskRequest.created_at.desc())
     if status:
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         if statuses:
@@ -1955,6 +1983,7 @@ def _recurring_from_payload(
         max_retries=max(0, payload.max_retries),
         retry_delay=max(1, payload.retry_delay),
         enabled=1 if payload.enabled else 0,
+        keep_visible=payload.keep_visible,
         next_run_at=next_run_at,
     )
 
@@ -2000,6 +2029,8 @@ def update_recurring(
     rt.max_retries = updated.max_retries
     rt.retry_delay = updated.retry_delay
     rt.enabled = updated.enabled
+    if "keep_visible" in payload.model_fields_set:
+        rt.keep_visible = updated.keep_visible
     rt.next_run_at = updated.next_run_at
     db.commit()
     db.refresh(rt)

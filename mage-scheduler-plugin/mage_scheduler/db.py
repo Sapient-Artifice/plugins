@@ -140,6 +140,7 @@ def _migrate_schema() -> None:
         }
         if recurring_columns:
             _add_column_if_missing(connection, "recurring_tasks", recurring_columns, "require_ack", "INTEGER NOT NULL DEFAULT 0")
+            _add_column_if_missing(connection, "recurring_tasks", recurring_columns, "keep_visible", "INTEGER")
 
 
 def _rename_column_if_exists(

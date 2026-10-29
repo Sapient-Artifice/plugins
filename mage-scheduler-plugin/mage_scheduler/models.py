@@ -172,6 +172,10 @@ class RecurringTask(Base):
     require_ack = Column(Integer, default=0, nullable=False)
     next_run_at = Column(DateTime, nullable=True)
     last_run_at = Column(DateTime, nullable=True)
+    # Rolling hide: when set, only this task's newest N SUCCESSFUL runs are
+    # listed; older successes are hidden (not deleted) and every unsuccessful
+    # run stays listed. Null = list everything.
+    keep_visible = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     @property

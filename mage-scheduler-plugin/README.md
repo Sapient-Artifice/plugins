@@ -122,6 +122,8 @@ A **Task** (`TaskRequest`) is a single scheduled execution. Fields:
 
 A **RecurringTask** holds a cron schedule and spawns a new `TaskRequest` each time it fires. The beat job (`check_recurring_tasks`) runs every 60 seconds, finds tasks whose `next_run_at <= now`, spawns the task, and advances `next_run_at` to the next occurrence.
 
+A frequent recurring task can set **`keep_visible`** (an integer ≥ 1) to stop its runs burying everything else. Only its newest N *successful* runs are listed, in the dashboard and in `GET /api/tasks`. Older successes are hidden, not deleted: `GET /api/tasks?include_hidden=true` and the dashboard's **Show** link list them, and each one stays reachable at `/tasks/{id}`. A run that did not succeed (failed, blocked, cancelled, missed, awaiting ack) is never hidden. Unset (the default) lists everything. A `PUT /api/recurring/{id}` that omits the field leaves it unchanged, and `null` switches it off.
+
 ```
 RecurringTask: "weekly_report"
   cron:      0 9 * * 1          ← Monday 09:00
@@ -429,7 +431,7 @@ The FastAPI backend is also directly accessible. Base URL: `http://127.0.0.1:801
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Liveness check; returns `{"status":"ok","uptime_seconds":N}` |
-| `GET` | `/api/tasks` | List tasks (`?status=scheduled,running` to filter) |
+| `GET` | `/api/tasks` | List tasks (`?status=scheduled,running` to filter; `?include_hidden=true` adds runs hidden by `keep_visible`) |
 | `GET` | `/api/tasks/{id}` | Get a single task |
 | `POST` | `/api/tasks` | Create a task directly (JSON `TaskCreate` body) |
 | `POST` | `/api/tasks/run_now` | Schedule a task for immediate execution |
