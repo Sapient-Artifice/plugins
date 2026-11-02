@@ -22,6 +22,7 @@ from models import Settings, TaskDependency, TaskRequest
 EXIT_OK = 0
 EXIT_CONFIG_ERROR = 1
 EXIT_UNDELIVERABLE = 3
+EXIT_UNCONFIRMED = 4
 DEFAULT_ACK_TIMEOUT_SECONDS = 900
 
 
@@ -167,7 +168,14 @@ def run_command(task_request_id: int, command: str) -> dict:
         # A delivered ask_assistant message (HTTP 200) only means "queued to the
         # frontend", not "received". Don't call it success: wait for an ack.
         if require_ack:
-            if result.returncode == EXIT_OK:
+            if result.returncode == EXIT_UNCONFIRMED:
+                # Sent, but the app had not answered in time (0.13+ starts the
+                # turn before answering). Not a failure: the receipt decides,
+                # and the ack deadline parks it as missed if none comes.
+                task_request.error = _truncate_output(
+                    (task_request.error or "") + "\nSent; no answer in time. Waiting for the "
+                    "assistant's receipt instead of failing.").strip()
+            if result.returncode in (EXIT_OK, EXIT_UNCONFIRMED):
                 task_request.status = "awaiting_ack"
                 task_request.ack_deadline = datetime.now(timezone.utc).replace(
                     tzinfo=None

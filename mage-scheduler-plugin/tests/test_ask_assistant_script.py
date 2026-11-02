@@ -2,7 +2,8 @@
 
 The script runs as a subprocess and makes real HTTP calls, so we point it at a
 throwaway local server (never at Mage). Exit codes are the contract run_command
-relies on: 0 delivered, 3 undeliverable/deferrable, 1 real error.
+relies on: 0 delivered, 3 undeliverable/deferrable, 4 sent but unconfirmed
+(Mage took the request and had not answered when the wait ran out), 1 real error.
 """
 from __future__ import annotations
 
@@ -18,9 +19,11 @@ SCRIPT = Path(__file__).resolve().parent.parent / "mage_scheduler" / "scripts" /
 _last_body: dict = {}
 
 
-def _make_server(status: int):
+def _make_server(status: int, delay: float = 0.0):
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
+            import time
+            time.sleep(delay)
             length = int(self.headers.get("Content-Length", 0))
             _last_body["raw"] = self.rfile.read(length).decode()
             self.send_response(status)
@@ -31,7 +34,7 @@ def _make_server(status: int):
         def log_message(self, *args):
             pass
 
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
@@ -89,5 +92,34 @@ def test_ack_instruction_included_in_message():
         body = _last_body["raw"]
         assert "scheduler_ack_task" in body
         assert "77" in body and "abc123" in body
+    finally:
+        srv.shutdown()
+
+
+# Mage 0.13 answers /ask_assistant only after it has STARTED the chat turn
+# (it used to queue and answer at once). When that takes longer than the
+# script waits, the message was sent; whether it landed is what the receipt
+# (ack) is for. Calling that a hard failure is what lost the 5 AM tasks.
+
+def test_a_slow_answer_is_sent_but_unconfirmed_not_failed():
+    srv = _make_server(200, delay=3)
+    try:
+        port = srv.server_address[1]
+        r = _run({"MESSAGE": "hi", "MAGE_ASK_ASSISTANT_URL": f"http://127.0.0.1:{port}/ask",
+                  "MAGE_ASK_ASSISTANT_TIMEOUT": "1"})
+        assert r.returncode == 4, (r.returncode, r.stderr)
+        assert "no answer within 1" in r.stderr
+    finally:
+        srv.shutdown()
+
+
+def test_the_default_wait_outlasts_a_slow_turn_start():
+    # 10 s used to be the whole wait; a 0.13 turn start can take longer.
+    srv = _make_server(200, delay=11)
+    try:
+        port = srv.server_address[1]
+        r = subprocess.run([sys.executable, str(SCRIPT)], capture_output=True, text=True, timeout=40,
+                           env={**os.environ, "MESSAGE": "hi", "MAGE_ASK_ASSISTANT_URL": f"http://127.0.0.1:{port}/ask"})
+        assert r.returncode == 0, (r.returncode, r.stderr)
     finally:
         srv.shutdown()

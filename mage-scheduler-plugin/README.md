@@ -178,6 +178,7 @@ To close that gap, an action or task can set **`require_ack`** (on by default fo
 2. The delivered message instructs the receiving assistant to confirm receipt by calling **`scheduler_ack_task(task_id, token)`**. A valid ack marks the task `success` and releases any dependents.
 3. If the ack window passes with no confirmation, the task is parked as **`missed`** — so it rides the missed-task flow above and can be re-delivered when someone is actually available (e.g. after the machine wakes). A late ack with a matching token is still accepted.
 4. If delivery can't happen at all (no frontend connected → `503`, or the app is unreachable), the task is parked as `missed` immediately rather than recorded as failed.
+5. If the app takes the request but hasn't answered when the wait runs out (`MAGE_ASK_ASSISTANT_TIMEOUT`, default 60s), the message was sent but is unconfirmed: the task goes to `awaiting_ack` like a delivery, and the receipt decides. Mage 0.13+ answers only after it has started the chat turn, which can take longer than the old 10s wait; recording that as a hard failure is what lost the early-morning tasks.
 
 This keeps all logic in the plugin — no dependence on the app reporting connection state — and measures the thing that matters: whether an assistant actually received the message.
 
@@ -419,6 +420,7 @@ Set in `.claude-plugin/plugin.json` under `mcpServers.env`, or export before sta
 | `SCHEDULER_TIMEZONE` | system local tz | Default timezone for scheduling (IANA name, e.g. `America/New_York`). Auto-detected on macOS/Linux (from `TZ` or `/etc/localtime`); set explicitly on Windows. |
 | `SCHEDULER_DASHBOARD_IN_BROWSER` | `0` | Open the dashboard in the system browser instead of the default in-app Mage Lab tab (see [Dashboard](#dashboard)). |
 | `MAGE_ASK_ASSISTANT_URL` | `http://127.0.0.1:11115/ask_assistant` | Endpoint the scheduler posts assistant notifications and ack-required messages to. |
+| `MAGE_ASK_ASSISTANT_TIMEOUT` | `60` | Seconds `ask_assistant.py` waits for the app's answer before treating the message as sent-but-unconfirmed. |
 
 The backend log is written to `$SCHEDULER_DATA_DIR/scheduler.log`. If the backend fails to start, check there first.
 
