@@ -80,6 +80,30 @@ class TestRunCommandAck:
         assert t.ack_token is None
         s2.close()
 
+    def test_sent_but_unconfirmed_waits_for_the_receipt(self, nt_mem_db, monkeypatch):
+        # Mage took the request but had not answered in time: it may well have
+        # started the turn. The receipt decides; if none comes, the existing
+        # ack-deadline path parks it as missed for re-delivery.
+        from jobs.run_command import run_command, EXIT_UNCONFIRMED
+        from models import TaskRequest
+
+        _patch_subprocess(monkeypatch, EXIT_UNCONFIRMED, stderr="ERROR: no answer within 60s")
+        s = nt_mem_db()
+        task = make_task(s, status="scheduled")
+        task.require_ack = 1
+        s.commit()
+        tid = task.id
+        s.close()
+
+        result = run_command(tid, "echo hi")
+
+        assert result.get("awaiting_ack") is True
+        s2 = nt_mem_db()
+        t = s2.get(TaskRequest, tid)
+        assert t.status == "awaiting_ack" and t.ack_token and t.ack_deadline is not None
+        assert "receipt" in (t.error or "")
+        s2.close()
+
     def test_config_error_fails(self, nt_mem_db, monkeypatch):
         from jobs.run_command import run_command
         from models import TaskRequest

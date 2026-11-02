@@ -23,12 +23,19 @@ import urllib.request
 #   0 -> delivered (HTTP 200)
 #   3 -> could not deliver because nobody is home (HTTP 503) or the app is
 #        unreachable; deferrable — the scheduler parks/retries rather than failing
+#   4 -> sent, unconfirmed: the app took the request but had not answered when
+#        the wait ran out. Mage 0.13+ answers only after it has STARTED the chat
+#        turn, which can take a while; the receipt (ack) decides whether it landed.
 #   1 -> real error (bad config, unexpected HTTP error)
 EXIT_OK = 0
 EXIT_CONFIG_ERROR = 1
 EXIT_UNDELIVERABLE = 3
+EXIT_UNCONFIRMED = 4
 
 ENDPOINT = os.environ.get("MAGE_ASK_ASSISTANT_URL", "http://127.0.0.1:11115/ask_assistant")
+# How long to wait for the app's answer. It was 10 s when the app only queued
+# the message; since 0.13 it starts the turn (session, MCP servers) first.
+TIMEOUT = float(os.environ.get("MAGE_ASK_ASSISTANT_TIMEOUT", "60"))
 
 message = os.environ.get("MESSAGE", "").strip()
 if not message:
@@ -77,7 +84,7 @@ req = urllib.request.Request(
 )
 
 try:
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         body = resp.read().decode()
         print(body)
 except urllib.error.HTTPError as exc:
@@ -87,9 +94,15 @@ except urllib.error.HTTPError as exc:
     # receive it. Deferrable rather than a hard failure.
     sys.exit(EXIT_UNDELIVERABLE if exc.code == 503 else EXIT_CONFIG_ERROR)
 except urllib.error.URLError as exc:
-    # App backend unreachable (e.g. Mage not running) — also deferrable.
+    # App backend unreachable (e.g. Mage not running, or no connection within
+    # the wait) — never reached it, so deferrable.
     print(f"ERROR: {exc}", file=sys.stderr)
     sys.exit(EXIT_UNDELIVERABLE)
+except TimeoutError:
+    # Connected and sent, but no answer in time: it may have landed.
+    print(f"ERROR: no answer within {TIMEOUT:g}s from ask_assistant (sent; the receipt decides "
+          f"whether it was received)", file=sys.stderr)
+    sys.exit(EXIT_UNCONFIRMED)
 except Exception as exc:
     print(f"ERROR: {exc}", file=sys.stderr)
     sys.exit(EXIT_CONFIG_ERROR)
