@@ -104,6 +104,92 @@ class TestRunCommandAck:
         assert "receipt" in (t.error or "")
         s2.close()
 
+    def test_undeliverable_keeps_the_reason(self, nt_mem_db, monkeypatch):
+        """The script's stderr (why nobody received it) lands on the task."""
+        from jobs.run_command import run_command, EXIT_UNDELIVERABLE
+        from models import TaskRequest
+
+        _patch_subprocess(monkeypatch, EXIT_UNDELIVERABLE,
+                          stderr='ERROR: HTTP 400 from ask_assistant: {"detail":{"type":"session_turn_rejected"}}')
+        s = nt_mem_db()
+        task = make_task(s, status="scheduled")
+        task.require_ack = 1
+        s.commit()
+        tid = task.id
+        s.close()
+
+        run_command(tid, "echo hi")
+
+        s2 = nt_mem_db()
+        t = s2.get(TaskRequest, tid)
+        assert t.status == "missed"
+        assert "Parked as missed" in t.error and "session_turn_rejected" in t.error
+        s2.close()
+
+    # A one-off created as a custom command that runs the ask_assistant script
+    # directly has no action and no require_ack. It is still a message to the
+    # assistant: "nobody could receive it" must park it, not fail it.
+
+    def test_undeliverable_custom_ask_assistant_command_goes_missed(self, nt_mem_db, monkeypatch):
+        from jobs.run_command import run_command, EXIT_UNDELIVERABLE
+        from models import TaskRequest
+
+        _patch_subprocess(monkeypatch, EXIT_UNDELIVERABLE, stderr="HTTP 400 session_turn_rejected")
+        cmd = '"/x/.venv/bin/python" "/x/mage_scheduler/scripts/ask_assistant.py"'
+        s = nt_mem_db()
+        task = make_task(s, status="scheduled", command=cmd)
+        assert task.require_ack in (0, None) and task.action_name is None
+        s.commit()
+        tid = task.id
+        s.close()
+
+        result = run_command(tid, cmd)
+
+        assert result == {"missed": "undeliverable", "task_id": tid}
+        s2 = nt_mem_db()
+        t = s2.get(TaskRequest, tid)
+        assert t.status == "missed" and t.ack_token is None
+        s2.close()
+
+    def test_undeliverable_ask_assistant_action_without_ack_goes_missed(self, nt_mem_db, monkeypatch):
+        from jobs.run_command import run_command, EXIT_UNDELIVERABLE
+        from models import TaskRequest
+
+        _patch_subprocess(monkeypatch, EXIT_UNDELIVERABLE)
+        s = nt_mem_db()
+        action = make_action(s, name="ask_assistant", command="echo hi")
+        action.require_ack = 0
+        task = make_task(s, status="scheduled")
+        task.action_name = "ask_assistant"
+        task.require_ack = 0
+        s.commit()
+        tid = task.id
+        s.close()
+
+        run_command(tid, "echo hi")
+
+        s2 = nt_mem_db()
+        assert s2.get(TaskRequest, tid).status == "missed"
+        s2.close()
+
+    def test_exit_3_from_an_ordinary_command_still_fails(self, nt_mem_db, monkeypatch):
+        """Exit 3 only means 'undeliverable' for the ask_assistant contract."""
+        from jobs.run_command import run_command
+        from models import TaskRequest
+
+        _patch_subprocess(monkeypatch, 3, stderr="grep: no match")
+        s = nt_mem_db()
+        task = make_task(s, status="scheduled", command="grep foo bar.txt")
+        s.commit()
+        tid = task.id
+        s.close()
+
+        run_command(tid, "grep foo bar.txt")
+
+        s2 = nt_mem_db()
+        assert s2.get(TaskRequest, tid).status == "failed"
+        s2.close()
+
     def test_config_error_fails(self, nt_mem_db, monkeypatch):
         from jobs.run_command import run_command
         from models import TaskRequest

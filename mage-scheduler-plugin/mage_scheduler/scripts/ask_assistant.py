@@ -21,8 +21,10 @@ import urllib.request
 
 # Exit codes are meaningful to the scheduler's run_command:
 #   0 -> delivered (HTTP 200)
-#   3 -> could not deliver because nobody is home (HTTP 503) or the app is
-#        unreachable; deferrable — the scheduler parks/retries rather than failing
+#   3 -> could not deliver: nobody is home (HTTP 503), the app is unreachable,
+#        or the app refused to start the turn (HTTP 400 session_turn_rejected,
+#        e.g. it could not renew the gateway sign-in while the screen was
+#        locked); deferrable — the scheduler parks/retries rather than failing
 #   4 -> sent, unconfirmed: the app took the request but had not answered when
 #        the wait ran out. Mage 0.13+ answers only after it has STARTED the chat
 #        turn, which can take a while; the receipt (ack) decides whether it landed.
@@ -31,6 +33,25 @@ EXIT_OK = 0
 EXIT_CONFIG_ERROR = 1
 EXIT_UNDELIVERABLE = 3
 EXIT_UNCONFIRMED = 4
+
+
+def is_turn_rejection(body: str) -> bool:
+    """True if the app refused to START the turn (Mage 0.13+ ``session_turn_rejected``).
+
+    Since 0.13 the app admits the chat turn before answering /ask_assistant, and
+    answers HTTP 400 with ``{"detail": {"type": "session_turn_rejected", ...}}``
+    when admission fails — most often ``code=gateway_authentication`` because it
+    could not renew the gateway sign-in (the desktop UI must answer a refresh
+    request, which it does not do while the screen is locked). The message
+    never entered a turn, so nobody received it: that is undeliverable, not a
+    configuration error, and the scheduler should park and re-deliver it.
+    """
+    try:
+        detail = json.loads(body).get("detail")
+    except (ValueError, AttributeError):
+        return False
+    return isinstance(detail, dict) and detail.get("type") == "session_turn_rejected"
+
 
 ENDPOINT = os.environ.get("MAGE_ASK_ASSISTANT_URL", "http://127.0.0.1:11115/ask_assistant")
 # How long to wait for the app's answer. It was 10 s when the app only queued
@@ -92,7 +113,9 @@ except urllib.error.HTTPError as exc:
     print(f"ERROR: HTTP {exc.code} from ask_assistant: {body}", file=sys.stderr)
     # 503 = "No active frontend websocket connection" — nobody is home to
     # receive it. Deferrable rather than a hard failure.
-    sys.exit(EXIT_UNDELIVERABLE if exc.code == 503 else EXIT_CONFIG_ERROR)
+    if exc.code == 503 or is_turn_rejection(body):
+        sys.exit(EXIT_UNDELIVERABLE)
+    sys.exit(EXIT_CONFIG_ERROR)
 except urllib.error.URLError as exc:
     # App backend unreachable (e.g. Mage not running, or no connection within
     # the wait) — never reached it, so deferrable.
