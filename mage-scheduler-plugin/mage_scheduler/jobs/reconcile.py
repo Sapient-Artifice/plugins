@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from db import SessionLocal, init_db
+from jobs import is_assistant_delivery
 from models import Settings, TaskDependency, TaskRequest
 from notify import os_notify, post_to_assistant
 
@@ -200,8 +201,13 @@ def _apply_missed_policy(session, now: datetime, summary: dict, policy: str) -> 
 
 
 def _is_interactive(task: TaskRequest) -> bool:
-    """A task that needs a live human/assistant to receive it (ask_assistant)."""
-    return bool(task.require_ack) or task.action_name == "ask_assistant"
+    """A task that needs a live human/assistant to receive it (ask_assistant).
+
+    Includes a custom command that runs the ask_assistant script without the
+    action, so an auto_run re-delivery of it is throttled like any other
+    interactive task instead of being re-dispatched every beat.
+    """
+    return bool(task.require_ack) or is_assistant_delivery(task.action_name, task.command)
 
 
 def _throttle_elapsed(last, now: datetime, interval: int) -> bool:

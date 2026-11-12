@@ -384,6 +384,31 @@ class TestMissedPolicyOngoing:
         assert t.status == "scheduled" and t.last_notified_at is not None
         s2.close()
 
+    def test_auto_run_throttles_a_custom_ask_assistant_command(self, rec_db):
+        """A parked custom command that runs the ask_assistant script is interactive too.
+
+        Otherwise auto_run would re-dispatch it every 60 s beat while the app
+        keeps refusing it, instead of on the re-delivery backoff.
+        """
+        from jobs.reconcile import reconcile_scheduled_tasks
+        from models import TaskRequest
+
+        Factory, dispatched = rec_db
+        _set_policy(Factory, "auto_run")
+        s = Factory()
+        t = TaskRequest(
+            description="parked one-off", status="missed",
+            command='"/x/bin/python" "/x/scripts/ask_assistant.py"',
+            run_at=_now() - timedelta(hours=1), action_name=None, require_ack=0,
+            last_notified_at=_now() - timedelta(minutes=5),  # inside the backoff
+        )
+        s.add(t); s.commit(); s.close()
+
+        summary = reconcile_scheduled_tasks(startup=False)
+
+        assert dispatched == []
+        assert summary["auto_run"] == []
+
     def test_auto_run_respects_redeliver_backoff(self, rec_db):
         from jobs.reconcile import reconcile_scheduled_tasks
 

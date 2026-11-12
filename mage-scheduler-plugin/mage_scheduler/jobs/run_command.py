@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 
 from db import SessionLocal, init_db
+from jobs import is_assistant_delivery
 from models import Settings, TaskDependency, TaskRequest
 
 # ask_assistant.py exit codes (kept in sync with scripts/ask_assistant.py)
@@ -114,6 +115,11 @@ def run_command(task_request_id: int, command: str) -> dict:
             if action is not None and action.require_ack:
                 require_ack = True
                 task_request.require_ack = 1  # persist the effective flag
+        # A delivery to the assistant can come back "nobody could receive it"
+        # (exit 3) whether or not a receipt is required; that is deferrable.
+        deferrable = require_ack or is_assistant_delivery(
+            task_request.action_name, command
+        )
         ack_token = None
         ack_timeout = DEFAULT_ACK_TIMEOUT_SECONDS
         if require_ack:
@@ -164,6 +170,23 @@ def run_command(task_request_id: int, command: str) -> dict:
         task_request.result = _truncate_output(result.stdout.strip() if result.stdout else None)
         task_request.error = _truncate_output(result.stderr.strip() if result.stderr else None)
 
+        # --- Undeliverable: nobody could receive it ------------------------
+        # The app was unreachable, had no frontend connected, or refused to
+        # start the turn (e.g. could not renew its sign-in while the screen
+        # was locked). The message never reached anyone, so this is not a
+        # failure: park it as missed so the dashboard asks you and the policy
+        # re-delivers it. Applies to any assistant delivery, receipt or not.
+        if deferrable and result.returncode == EXIT_UNDELIVERABLE:
+            task_request.status = "missed"
+            task_request.ack_token = None
+            task_request.error = _truncate_output(
+                "Not delivered: no assistant was available to receive the "
+                "message. Parked as missed for re-delivery."
+                + (f"\n{result.stderr.strip()}" if result.stderr and result.stderr.strip() else "")
+            )
+            session.commit()
+            return {"missed": "undeliverable", "task_id": task_request_id}
+
         # --- Receipt-acknowledgment handling -------------------------------
         # A delivered ask_assistant message (HTTP 200) only means "queued to the
         # frontend", not "received". Don't call it success: wait for an ack.
@@ -182,17 +205,6 @@ def run_command(task_request_id: int, command: str) -> dict:
                 ) + timedelta(seconds=ack_timeout)
                 session.commit()
                 return {"awaiting_ack": True, "task_id": task_request_id}
-            if result.returncode == EXIT_UNDELIVERABLE:
-                # Nobody was available to receive it — park as missed so it can
-                # be re-delivered later rather than recorded as failed/success.
-                task_request.status = "missed"
-                task_request.ack_token = None
-                task_request.error = _truncate_output(
-                    "Not delivered: no assistant was available to receive the "
-                    "message. Parked as missed for re-delivery."
-                )
-                session.commit()
-                return {"missed": "undeliverable", "task_id": task_request_id}
             # Any other non-zero exit is a real error → fall through to
             # the standard retry / failed handling below.
 
